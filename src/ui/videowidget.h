@@ -59,9 +59,8 @@ private:
     void setupUI();
     void setupConnections();
     void setAnalysisInProgress(bool inProgress);
-    void promptForPaths(); // SỬA LỖI: Cập nhật tên hàm cho nhất quán
-    QString getCacheKey(const QString& filePath);
-    QString getCachedReportPath(const QString& cacheKey);
+    void promptForPaths();
+    QString findExistingReport(const QString& videoPath) const;
     QString getCurrentDefaultSaveDir() const;
 
     // UI Elements
@@ -84,9 +83,7 @@ private:
     // State
     QString m_currentVideoPath;
     QString m_currentReportPath;
-    QString m_currentCacheKey;
     AnalysisMode m_currentMode = AnalysisMode::IDLE;
-    QString m_cacheDir;
     bool m_isAnalysisInProgress = false;
     QStringList m_logHistory;
     double m_currentFps = 0.0;
@@ -94,3 +91,4 @@ private:
 };
 
 #endif // VIDEOWIDGET_H
+

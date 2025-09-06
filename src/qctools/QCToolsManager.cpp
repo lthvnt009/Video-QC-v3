@@ -19,7 +19,7 @@
 #include <memory> 
 
 // =============================================================================
-// CẤU TRÚC DỮ LIỆU & HÀM TIỆN ÍCH NỘI BỘ
+// DATA STRUCTURES & INTERNAL UTILITY FUNCTIONS
 // =============================================================================
 
 struct FrameData {
@@ -52,21 +52,6 @@ struct BorderGroup {
     CropValues maxCv;
 };
 
-
-static QString frameToTimecodeHHMMSSFF(int frame, double fps) {
-    if (fps <= 0 || frame < 0) return "00:00:00:00";
-    double totalSeconds = frame / fps;
-    int hours = static_cast<int>(totalSeconds) / 3600;
-    int minutes = (static_cast<int>(totalSeconds) % 3600) / 60;
-    int seconds = static_cast<int>(totalSeconds) % 60;
-    int frameOfSecond = static_cast<int>(frame % static_cast<int>(round(fps)));
-    return QString("%1:%2:%3:%4")
-        .arg(hours, 2, 10, QChar('0'))
-        .arg(minutes, 2, 10, QChar('0'))
-        .arg(seconds, 2, 10, QChar('0'))
-        .arg(frameOfSecond, 2, 10, QChar('0'));
-}
-
 static QString formatCropDetails(const CropValues& min_vals, const CropValues& max_vals, int w, int h) {
     if (w <= 0 || h <= 0) return "Kích thước video không xác định";
     QStringList parts;
@@ -85,7 +70,7 @@ static QString formatCropDetails(const CropValues& min_vals, const CropValues& m
     return parts.join(", ");
 }
 
-#define CHUNK 16384 // Sử dụng buffer 16KB
+#define CHUNK 16384 // Use 16KB buffer
 static std::shared_ptr<QTemporaryFile> decompressGzFile(const QString& gzPath)
 {
     QFile gzFile(gzPath);
@@ -158,24 +143,32 @@ static std::shared_ptr<QTemporaryFile> decompressGzFile(const QString& gzPath)
 
 
 // =============================================================================
-// TRIỂN KHAI LỚP QCToolsManager
+// CLASS IMPLEMENTATION: QCToolsManager
 // =============================================================================
 QCToolsManager::QCToolsManager(QObject *parent) : QObject(parent) {}
 QCToolsManager::~QCToolsManager() { cleanup(); }
 
 QString QCToolsManager::getReportPath(ReportType type) const
 {
-    QString baseName; QString reportDir;
+    QString baseNameWithExt; 
+    QString reportDir;
+    
     if (!m_filePath.isEmpty()) {
         QFileInfo fileInfo(m_filePath);
-        // CẢI TIẾN: Lấy toàn bộ tên file (bao gồm cả phần mở rộng)
-        baseName = fileInfo.fileName();
+        baseNameWithExt = fileInfo.fileName();
         reportDir = m_reportDir;
     } else if (!m_sourceReportPath.isEmpty()) {
         QFileInfo fileInfo(m_sourceReportPath);
-        baseName = fileInfo.completeBaseName();
-        if (baseName.endsWith(".qctools.xml")) { baseName.chop(12); }
-        else if (baseName.endsWith(".xml")) { baseName.chop(4); }
+        baseNameWithExt = fileInfo.completeBaseName(); // Start with the full base name
+        if (baseNameWithExt.endsWith(".qctools.xml.gz")) {
+             baseNameWithExt.chop(16);
+        } else if (baseNameWithExt.endsWith(".qctools.xml")) {
+             baseNameWithExt.chop(12);
+        } else if (baseNameWithExt.endsWith(".xml.gz")) {
+             baseNameWithExt.chop(7);
+        } else if (baseNameWithExt.endsWith(".xml")) {
+             baseNameWithExt.chop(4);
+        }
         reportDir = fileInfo.absolutePath();
     } else { return QString(); }
 
@@ -183,19 +176,12 @@ QString QCToolsManager::getReportPath(ReportType type) const
 
     switch(type) {
         case ReportType::XML:
-            if (m_tempDir) { return m_tempDir->path() + "/" + baseName + ".qctools.xml"; }
-            return reportDir + "/" + baseName + ".qctools.xml";
-        case ReportType::GZ: return reportDir + "/" + baseName + ".qctools.xml.gz";
-        case ReportType::MKV: return reportDir + "/" + baseName + ".qctools.mkv";
+            if (m_tempDir && m_tempDir->isValid()) { return m_tempDir->path() + "/" + baseNameWithExt + ".qctools.xml"; }
+            return reportDir + "/" + baseNameWithExt + ".qctools.xml";
+        case ReportType::GZ: return reportDir + "/" + baseNameWithExt + ".qctools.xml.gz";
+        case ReportType::MKV: return reportDir + "/" + baseNameWithExt + ".qctools.mkv";
     }
     return QString();
-}
-
-QString QCToolsManager::frameToTimecodePrecise(int frame, double fps) {
-    if (fps <= 0 || frame < 0) return "00:00:00.000";
-    double totalSeconds = frame / fps;
-    int totalMilliseconds = static_cast<int>(totalSeconds * 1000.0);
-    return QTime(0,0,0,0).addMSecs(totalMilliseconds).toString("HH:mm:ss.zzz");
 }
 
 void QCToolsManager::cleanup() {
@@ -225,7 +211,7 @@ void QCToolsManager::doWork(const QString &filePath, const QVariantMap &settings
     m_reportDir = createReportDirectory();
     
     m_totalSteps = m_totalStepsAnalyze;
-    m_currentStep = 1;
+    m_currentStep = 1; // Luôn bắt đầu từ bước 1
     m_currentPhase = "Chuẩn bị Phân tích"; 
     emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
     emit logMessage(QString("[%1] Bắt đầu Bước 1/%2: %3...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_totalSteps).arg(m_currentPhase));
@@ -259,6 +245,7 @@ void QCToolsManager::doWork(const QString &filePath, const QVariantMap &settings
 void QCToolsManager::processReportFile(const QString &reportPath, const QVariantMap &settings) {
     cleanup();
     m_stopRequested = false; m_totalFrames = 0; m_fps = 0; m_videoWidth = 0; m_videoHeight = 0;
+    m_currentStep = 0; // Sửa lỗi: Reset biến đếm bước
     AnalysisResult::resetIdCounter(); 
     emit analysisStarted();
     emit logMessage(QString("[%1] Bắt đầu phiên làm việc mới (Xem báo cáo).").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss")));
@@ -377,7 +364,7 @@ void QCToolsManager::startMkvGeneration() {
         return; 
     }
     m_currentStep = 6;
-    m_currentPhase = "Tạo .mkv (nền)";
+    m_currentPhase = "Tạo .qctools.mkv";
     emit logMessage(QString("[%1] Bắt đầu Bước %2/%3: %4...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
     emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
     m_backgroundProcess = new QProcess(this);
@@ -389,7 +376,7 @@ void QCToolsManager::startMkvGeneration() {
 
 void QCToolsManager::onMkvGenerationFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     if (m_stopRequested) {
-        emit logMessage(QString("[%1] Bước 6 (tạo .mkv) đã được người dùng dừng lại.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
+        emit logMessage(QString("[%1] Bước 6 (tạo .qctools.mkv) đã được người dùng dừng lại.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
         emit analysisFinished(false);
         return;
     }
@@ -398,10 +385,10 @@ void QCToolsManager::onMkvGenerationFinished(int exitCode, QProcess::ExitStatus 
     bool success = (exitCode == 0);
     if (success) {
         msg = QString("Đã tạo thành công báo cáo '%1'").arg(QFileInfo(getReportPath(ReportType::MKV)).fileName());
-        emit logMessage(QString("[%1] Hoàn tất Bước 6. Đã tạo file .mkv thành công.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
+        emit logMessage(QString("[%1] Hoàn tất Bước 6. Đã tạo file .qctools.mkv thành công.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
     } else {
-        msg = "Lỗi: Không thể tạo báo cáo .mkv";
-        emit logMessage(QString("[%1] Bước 6 (tạo .mkv) thất bại.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
+        msg = "Lỗi: Không thể tạo báo cáo .qctools.mkv";
+        emit logMessage(QString("[%1] Bước 6 (tạo .qctools.mkv) thất bại.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
     }
     emit backgroundTaskFinished(msg);
     emit analysisFinished(true); 
@@ -460,7 +447,7 @@ void QCToolsManager::readAnalysisOutput() {
 }
 
 // =============================================================================
-// LOGIC PHÂN TÍCH BÁO CÁO
+// REPORT PARSING LOGIC
 // =============================================================================
 
 void QCToolsManager::parseReport(const QString &reportPath) {
@@ -633,7 +620,6 @@ QMap<int, QSet<QString>> QCToolsManager::tagFramesForErrors(const QList<FrameDat
             }
         }
 
-        // HOÀN NGUYÊN: Sử dụng lại logic phát hiện lỗi gốc chính xác
         if (m_settings.value(AppConstants::K_DETECT_ORPHAN_FRAMES, true).toBool() && i > 0) {
             if (hasTransitions) {
                 if (i < allFramesData.size() - 1) {
@@ -684,7 +670,7 @@ void QCToolsManager::groupBlackFrames(QList<AnalysisResult> &results, const QMap
             if (!currentGroup.isEmpty()) {
                 double yavgSum = 0;
                 for(const auto& f : currentGroup) yavgSum += f.yavg;
-                results.append({ frameToTimecodeHHMMSSFF(currentGroup.first().frameNum, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, QString("Frame tối (YAVG TB: %1)").arg(yavgSum / currentGroup.count(), 0, 'f', 2), currentGroup.first().frameNum });
+                results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroup.first().frameNum, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, QString("Frame tối (YAVG TB: %1)").arg(yavgSum / currentGroup.count(), 0, 'f', 2), currentGroup.first().frameNum });
                 currentGroup.clear();
             }
         }
@@ -692,7 +678,7 @@ void QCToolsManager::groupBlackFrames(QList<AnalysisResult> &results, const QMap
     if (!currentGroup.isEmpty()) {
          double yavgSum = 0;
          for(const auto& f : currentGroup) yavgSum += f.yavg;
-         results.append({ frameToTimecodeHHMMSSFF(currentGroup.first().frameNum, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, QString("Frame tối (YAVG TB: %1)").arg(yavgSum / currentGroup.count(), 0, 'f', 2), currentGroup.first().frameNum });
+         results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroup.first().frameNum, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, QString("Frame tối (YAVG TB: %1)").arg(yavgSum / currentGroup.count(), 0, 'f', 2), currentGroup.first().frameNum });
     }
 }
 
@@ -716,13 +702,13 @@ void QCToolsManager::groupBorderedFrames(QList<AnalysisResult> &results, const Q
             }
         } else {
             if (currentGroupOpt.has_value()) {
-                results.append({ frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight), currentGroupOpt->startFrame });
+                results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight), currentGroupOpt->startFrame });
                 currentGroupOpt.reset();
             }
         }
     }
     if (currentGroupOpt.has_value()) {
-        results.append({ frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight), currentGroupOpt->startFrame });
+        results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight), currentGroupOpt->startFrame });
     }
 }
 
@@ -756,7 +742,7 @@ void QCToolsManager::findOrphanFrames(QList<AnalysisResult> &results, const QMap
             }
         }
         if (duration > 0 && duration <= orphanThresh && sceneContainsNonBlackFrames) {
-            results.append({ frameToTimecodeHHMMSSFF(startFrame, m_fps), QString::number(duration), AppConstants::ERR_ORPHAN_FRAME, QString("Cảnh ngắn bất thường, từ frame %1 đến %2").arg(startFrame).arg(endFrame - 1), startFrame });
+            results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(startFrame, m_fps), QString::number(duration), AppConstants::ERR_ORPHAN_FRAME, QString("Cảnh ngắn bất thường, từ frame %1 đến %2").arg(startFrame).arg(endFrame - 1), startFrame });
         }
     }
 }
@@ -764,7 +750,6 @@ void QCToolsManager::findOrphanFrames(QList<AnalysisResult> &results, const QMap
 QString QCToolsManager::createReportDirectory() {
     if (m_filePath.isEmpty()) return QString();
     QFileInfo fileInfo(m_filePath);
-    // CẢI TIẾN: Không tạo thư mục con, chỉ trả về đường dẫn của thư mục chứa video
     return fileInfo.absolutePath();
 }
 

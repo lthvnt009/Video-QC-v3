@@ -1,6 +1,6 @@
 // src/ui/configwidget.cpp
-#include "configwidget.h"
-#include "core/Constants.h" // BƯỚC 1.4: Thêm file header mới
+#include "ConfigWidget.h"
+#include "core/Constants.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -225,7 +225,6 @@ QVariantMap ConfigWidget::getSettings() const
 
 void ConfigWidget::onSelectFileClicked()
 {
-    // CẢI TIẾN: Mở rộng các định dạng video được hỗ trợ
     const QString videoFilter = "Video Files (*.mp4 *.mov *.avi *.mkv *.ts *.m2ts *.mxf);;All Files (*)";
     QString path = QFileDialog::getOpenFileName(this, "Chọn file video", "", videoFilter);
     if (!path.isEmpty()) {
@@ -235,11 +234,9 @@ void ConfigWidget::onSelectFileClicked()
 
 void ConfigWidget::onSelectReportClicked()
 {
-    // CẢI TIẾN: Mở rộng định dạng file báo cáo được hỗ trợ để bao gồm cả đuôi file mới
-    const QString reportFilter = "QCTools Reports (*.qctools.xml *.qctools.xml.gz *.qctools.mkv *.xml *.xml.gz *.mkv);;All Files (*)";
+    const QString reportFilter = "QCTools Reports (*.xml *.xml.gz *.qctools.xml *.qctools.xml.gz *.qctools.mkv);;All Files (*)";
     QString path = QFileDialog::getOpenFileName(this, "Chọn file báo cáo QCTools", "", reportFilter);
     if (!path.isEmpty()) {
         emit reportPathSelected(path);
     }
 }
-

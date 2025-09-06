@@ -7,11 +7,12 @@
 #include <atomic>
 #include "core/types.h"
 #include <QProcess>
-#include <memory> // CẢI TIẾN: Thêm thư viện con trỏ thông minh
+#include <memory>
+#include <QTime> // Sửa lỗi: Thêm header cần thiết
 
 class QTemporaryDir;
-class QXmlStreamReader; // Forward declaration
-struct FrameData; // Forward declaration
+class QXmlStreamReader;
+struct FrameData;
 
 class QCToolsManager : public QObject
 {
@@ -24,7 +25,28 @@ public:
     enum class ReportType { GZ, MKV, XML };
     QString getReportPath(ReportType type) const;
 
-    static QString frameToTimecodePrecise(int frame, double fps);
+    // Sửa lỗi LNK2019: Chuyển định nghĩa của các hàm static vào header và khai báo inline
+    inline static QString frameToTimecodePrecise(int frame, double fps) {
+        if (fps <= 0 || frame < 0) return "00:00:00.000";
+        double totalSeconds = frame / fps;
+        int totalMilliseconds = static_cast<int>(totalSeconds * 1000.0);
+        return QTime(0,0,0,0).addMSecs(totalMilliseconds).toString("HH:mm:ss.zzz");
+    }
+
+    inline static QString frameToTimecodeHHMMSSFF(int frame, double fps) {
+        if (fps <= 0 || frame < 0) return "00:00:00:00";
+        double totalSeconds = frame / fps;
+        int hours = static_cast<int>(totalSeconds) / 3600;
+        int minutes = (static_cast<int>(totalSeconds) % 3600) / 60;
+        int seconds = static_cast<int>(totalSeconds) % 60;
+        int frameOfSecond = static_cast<int>(frame % static_cast<int>(round(fps)));
+        return QString("%1:%2:%3:%4")
+            .arg(hours, 2, 10, QChar('0'))
+            .arg(minutes, 2, 10, QChar('0'))
+            .arg(seconds, 2, 10, QChar('0'))
+            .arg(frameOfSecond, 2, 10, QChar('0'));
+    }
+
 
 signals:
     void analysisStarted();
@@ -68,7 +90,6 @@ private:
     QProcess *m_mainProcess = nullptr;
     QProcess *m_backgroundProcess = nullptr;
 
-    // CẢI TIẾN: Sử dụng con trỏ thông minh để quản lý bộ nhớ tự động và an toàn
     std::unique_ptr<QTemporaryDir> m_tempDir;
     QString m_reportDir;
 
@@ -89,7 +110,6 @@ private:
     QString m_currentPhase; 
     int m_currentStep = 0;
     
-    // CẢI TIẾN: Đưa hằng số vào header để quản lý tập trung
     const int m_totalStepsAnalyze = 6;
     const int m_totalStepsViewReport = 5;
     int m_totalSteps = 0;
