@@ -6,7 +6,8 @@
 #include "logdialog.h"
 #include "qctools/QCToolsManager.h"
 #include "qctools/QCToolsController.h"
-#include "core/Constants.h" 
+#include "core/Constants.h"
+#include "core/media_info.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -24,15 +25,20 @@
 #include <QDir>
 #include <QCryptographicHash>
 #include <QTimer>
-#include <QSettings> 
+#include <QSettings>
 
 VideoWidget::VideoWidget(QWidget *parent)
     : QWidget(parent)
 {
     qRegisterMetaType<AnalysisResult>("AnalysisResult");
     qRegisterMetaType<QList<AnalysisResult>>("QList<AnalysisResult>");
+    qRegisterMetaType<MediaInfo>("MediaInfo");
 
     setupUI();
+
+    m_statusResetTimer = new QTimer(this);
+    m_statusResetTimer->setSingleShot(true);
+    connect(m_statusResetTimer, &QTimer::timeout, this, &VideoWidget::onStatusResetTimeout);
 
     m_analysisThread = new QThread(this);
     m_qctoolsManager = new QCToolsManager();
@@ -41,9 +47,9 @@ VideoWidget::VideoWidget(QWidget *parent)
 
     setupConnections();
     m_analysisThread->start();
-    
+
     handleLogMessage(QString("[%1] Chương trình đã khởi động.").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss")));
-    
+
     QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
     QString qctoolsPath = settings.value(AppConstants::K_QCTOOLS_PATH).toString();
     QString qccliPath = settings.value(AppConstants::K_QCCLI_PATH).toString();
@@ -74,7 +80,7 @@ void VideoWidget::setupUI()
 {
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(10,10,10,10);
-    
+
     QWidget *controlPane = new QWidget;
     QVBoxLayout *controlLayout = new QVBoxLayout(controlPane);
     controlLayout->setSpacing(10);
@@ -86,14 +92,14 @@ void VideoWidget::setupUI()
     m_analyzeButton = new QPushButton("BẮT ĐẦU PHÂN TÍCH");
     m_analyzeButton->setStyleSheet("font-weight: bold; padding: 5px;");
     m_analyzeButton->setEnabled(false);
-    
+
     m_stopButton = new QPushButton("DỪNG PHÂN TÍCH");
     m_stopButton->setStyleSheet("background-color: #d9534f; color: white; font-weight: bold; padding: 5px; border-radius: 3px;");
-    
+
     m_analysisButtonStack = new QStackedWidget;
     m_analysisButtonStack->addWidget(m_analyzeButton);
     m_analysisButtonStack->addWidget(m_stopButton);
-    
+
     m_logButton = new QPushButton("Xem Log");
 
     controlButtonsLayout->addWidget(m_analysisButtonStack, 1);
@@ -103,18 +109,19 @@ void VideoWidget::setupUI()
     // --- Bottom Status Bar Layout ---
     QHBoxLayout* bottomBarLayout = new QHBoxLayout();
     m_statusLabel = new QLabel("Sẵn sàng. Vui lòng chọn file video hoặc file báo cáo.");
+    m_persistentStatusText = m_statusLabel->text();
     m_progressBar = new QProgressBar;
     m_progressBar->setTextVisible(false);
     m_progressBar->setFixedHeight(15);
-    
+
     bottomBarLayout->addWidget(m_statusLabel, 1);
     bottomBarLayout->addWidget(m_progressBar, 2);
 
     controlLayout->addWidget(m_configWidget);
     controlLayout->addLayout(controlButtonsLayout);
     controlLayout->addLayout(bottomBarLayout);
-    controlLayout->addWidget(m_resultsWidget, 1); 
-    
+    controlLayout->addWidget(m_resultsWidget, 1);
+
     mainLayout->addWidget(controlPane);
 }
 
@@ -129,7 +136,7 @@ void VideoWidget::setupConnections()
     connect(m_resultsWidget, &ResultsWidget::exportTxtClicked, this, &VideoWidget::onExportTxt);
     connect(m_resultsWidget, &ResultsWidget::copyToClipboardClicked, this, &VideoWidget::onCopyToClipboard);
     connect(m_logButton, &QPushButton::clicked, this, &VideoWidget::onShowLogClicked);
-    
+
     connect(m_resultsWidget, &ResultsWidget::errorDoubleClicked, this, &VideoWidget::onResultDoubleClicked);
     connect(m_qctoolsController, &QCToolsController::controllerError, this, &VideoWidget::onControllerError);
 
@@ -141,14 +148,14 @@ void VideoWidget::setupConnections()
     connect(m_qctoolsManager, &QCToolsManager::errorOccurred, this, &VideoWidget::handleError, Qt::QueuedConnection);
     connect(m_qctoolsManager, &QCToolsManager::logMessage, this, &VideoWidget::handleLogMessage, Qt::QueuedConnection);
     connect(m_qctoolsManager, &QCToolsManager::backgroundTaskFinished, this, &VideoWidget::handleBackgroundTaskFinished, Qt::QueuedConnection);
-    connect(m_qctoolsManager, &QCToolsManager::videoInfoReady, this, [this](double fps){ m_currentFps = fps; });
+    connect(m_qctoolsManager, &QCToolsManager::mediaInfoReady, this, &VideoWidget::handleMediaInfo, Qt::QueuedConnection);
 }
 
 void VideoWidget::handleFileDrop(const QString &path)
 {
     QFileInfo fileInfo(path);
     QString fileName = fileInfo.fileName().toLower();
-    
+
     if (fileName.endsWith(".xml") || fileName.endsWith(".xml.gz") || fileName.contains(".qctools.")) {
         onReportSelected(path);
     } else {
@@ -167,35 +174,53 @@ void VideoWidget::promptForPaths()
 void VideoWidget::onControllerError(const QString &message)
 {
     QMessageBox::critical(this, "Lỗi Khởi Chạy QCTools", message);
-    m_statusLabel->setText("Lỗi! Không thể khởi chạy QCTools.");
+    updateStatus("Lỗi! Không thể khởi chạy QCTools.");
     promptForPaths();
 }
 
-QString VideoWidget::findExistingReport(const QString &videoPath) const
+QString VideoWidget::findExistingReport(const QString &videoPath, QCToolsManager::ReportType type) const
 {
     QFileInfo videoInfo(videoPath);
     QString dirPath = videoInfo.absolutePath();
-    QString baseNameWithExt = videoInfo.fileName(); 
-    QString baseName = videoInfo.completeBaseName();
+    QString baseNameWithExt = videoInfo.fileName();
 
-    QStringList extensionsToTry = {
-        ".qctools.xml",
-        ".qctools.xml.gz",
-        ".qctools.mkv",
-        ".xml",
-        ".xml.gz"
-    };
+    QString reportPath;
+    switch(type){
+        case QCToolsManager::ReportType::XML:
+            reportPath = dirPath + "/" + baseNameWithExt + ".qctools.xml";
+            break;
+        case QCToolsManager::ReportType::GZ:
+            reportPath = dirPath + "/" + baseNameWithExt + ".qctools.xml.gz";
+            break;
+        case QCToolsManager::ReportType::MKV:
+            reportPath = dirPath + "/" + baseNameWithExt + ".qctools.mkv";
+            break;
+    }
 
-    for(const QString& ext : extensionsToTry) {
-        QString reportPath = (ext.startsWith(".qctools")) 
-                           ? dirPath + "/" + baseNameWithExt + ext
-                           : dirPath + "/" + baseName + ext;
-
-        if(QFile::exists(reportPath)) {
-            return reportPath;
-        }
+    if (QFile::exists(reportPath)) {
+        return reportPath;
     }
     return QString();
+}
+
+void VideoWidget::deleteAssociatedReports(const QString &videoPath)
+{
+    handleLogMessage("[INFO] Xóa các file báo cáo cũ để phân tích lại...");
+    QStringList reportsToDelete;
+    reportsToDelete << findExistingReport(videoPath, QCToolsManager::ReportType::XML)
+                    << findExistingReport(videoPath, QCToolsManager::ReportType::GZ)
+                    << findExistingReport(videoPath, QCToolsManager::ReportType::MKV);
+
+    for (const QString& reportPath : reportsToDelete) {
+        if (!reportPath.isEmpty() && QFile::exists(reportPath)) {
+            if (QFile::remove(reportPath)) {
+                handleLogMessage(QString("   - Đã xóa: %1").arg(QFileInfo(reportPath).fileName()));
+            } else {
+                handleLogMessage(QString("[WARNING] Không thể xóa file: %1").arg(QFileInfo(reportPath).fileName()));
+                QMessageBox::warning(this, "Lỗi xóa file", QString("Không thể xóa file báo cáo cũ:\n%1").arg(reportPath));
+            }
+        }
+    }
 }
 
 
@@ -208,34 +233,65 @@ void VideoWidget::onFileSelected(const QString &path)
     m_progressBar->setValue(0);
     emit videoFileChanged(QFileInfo(path).fileName());
     m_configWidget->setInputPath(path);
-    
-    QString existingReport = findExistingReport(path);
-    
-    if (!existingReport.isEmpty()) {
-        handleLogMessage(QString("[INFO] Đã phát hiện file báo cáo có sẵn: %1").arg(existingReport));
-        
+
+    QString existingXmlOrGzReport = findExistingReport(path, QCToolsManager::ReportType::XML);
+    if(existingXmlOrGzReport.isEmpty()) existingXmlOrGzReport = findExistingReport(path, QCToolsManager::ReportType::GZ);
+
+    if (!existingXmlOrGzReport.isEmpty()) {
+        handleLogMessage(QString("[INFO] Đã phát hiện file báo cáo có sẵn: %1").arg(existingXmlOrGzReport));
+
         QMessageBox msgBox(this);
-        msgBox.setWindowTitle("Phát hiện dữ liệu thô");
-        msgBox.setText(QString("Đã tìm thấy một file báo cáo có sẵn cho video này.\n'%1'").arg(QFileInfo(existingReport).fileName()));
+        msgBox.setWindowTitle("Phát hiện dữ liệu có sẵn");
+        msgBox.setText(QString("Đã tìm thấy một file báo cáo có sẵn cho video này.\n'%1'").arg(QFileInfo(existingXmlOrGzReport).fileName()));
         msgBox.setInformativeText("Bạn muốn làm gì?");
         QPushButton* reanalyzeButton = msgBox.addButton("Phân tích lại (Ghi đè)", QMessageBox::ActionRole);
         QPushButton* viewReportButton = msgBox.addButton("Xem báo cáo có sẵn", QMessageBox::ActionRole);
+        QPushButton* cancelButton = msgBox.addButton("Hủy", QMessageBox::RejectRole);
         msgBox.setDefaultButton(viewReportButton);
+        msgBox.setEscapeButton(cancelButton);
+
         msgBox.exec();
 
         if (msgBox.clickedButton() == viewReportButton) {
-            m_currentMode = AnalysisMode::VIEW_REPORT;
-            m_currentReportPath = existingReport;
-            onAnalyzeClicked(); // Kích hoạt ngay lập tức
-        } else {
-             m_statusLabel->setText("Đã phát hiện dữ liệu thô. Sẵn sàng phân tích lại.");
+            onReportSelected(existingXmlOrGzReport);
+        } else if (msgBox.clickedButton() == reanalyzeButton) {
+             deleteAssociatedReports(path);
+             updateStatus("Sẵn sàng phân tích lại. Các báo cáo cũ đã được xóa.");
              m_currentMode = AnalysisMode::ANALYZE_VIDEO;
-             onAnalyzeClicked(); // Kích hoạt ngay lập tức
+             onAnalyzeClicked();
         }
     } else {
-        m_statusLabel->setText("Đã chọn file. Sẵn sàng phân tích.");
-        m_currentMode = AnalysisMode::ANALYZE_VIDEO;
-        m_analyzeButton->setEnabled(true);
+        QString existingMkvReport = findExistingReport(path, QCToolsManager::ReportType::MKV);
+        if (!existingMkvReport.isEmpty()) {
+            handleLogMessage(QString("[INFO] Đã phát hiện file báo cáo .mkv: %1").arg(existingMkvReport));
+
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle("Cảnh báo: Hạn chế của File .mkv");
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText("Đã tìm thấy file báo cáo .mkv có sẵn. Do hạn chế của công cụ, việc xem báo cáo từ file này có thể dẫn đến việc phát hiện sai tất cả các frame là lỗi 'Viền Đen'.");
+            msgBox.setInformativeText("Để có kết quả chính xác nhất, bạn nên phân tích lại video. Bạn muốn làm gì?");
+
+            QPushButton* reanalyzeButton = msgBox.addButton("Phân tích lại (Khuyến nghị)", QMessageBox::ActionRole);
+            QPushButton* viewMkvButton = msgBox.addButton("Vẫn xem báo cáo .mkv", QMessageBox::ActionRole);
+            QPushButton* cancelButton = msgBox.addButton("Hủy", QMessageBox::RejectRole);
+            msgBox.setDefaultButton(reanalyzeButton);
+            msgBox.setEscapeButton(cancelButton);
+
+            msgBox.exec();
+
+            if (msgBox.clickedButton() == reanalyzeButton) {
+                deleteAssociatedReports(path);
+                updateStatus("Sẵn sàng phân tích lại. Các báo cáo cũ đã được xóa.");
+                m_currentMode = AnalysisMode::ANALYZE_VIDEO;
+                onAnalyzeClicked();
+            } else if (msgBox.clickedButton() == viewMkvButton) {
+                onReportSelected(existingMkvReport);
+            }
+        } else {
+            updateStatus("Đã chọn file. Sẵn sàng phân tích.");
+            m_currentMode = AnalysisMode::ANALYZE_VIDEO;
+            m_analyzeButton->setEnabled(true);
+        }
     }
 }
 
@@ -243,16 +299,90 @@ void VideoWidget::onReportSelected(const QString &path)
 {
     handleLogMessage(QString("[%1] Đã nhập file báo cáo: %2").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss")).arg(path));
     m_currentReportPath = path;
+
+    // SỬA LỖI: Cải thiện logic lấy tên file gốc từ tên file báo cáo
+    QFileInfo reportInfo(path);
+    QString fileName = reportInfo.fileName();
+    QString baseName;
+
+    if (fileName.endsWith(".qctools.xml.gz")) {
+        baseName = fileName.left(fileName.length() - 16);
+    } else if (fileName.endsWith(".qctools.mkv")) {
+        baseName = fileName.left(fileName.length() - 12);
+    } else if (fileName.endsWith(".qctools.xml")) {
+        baseName = fileName.left(fileName.length() - 12);
+    } else if (fileName.endsWith(".xml.gz")) {
+        baseName = fileName.left(fileName.length() - 7);
+    } else if (fileName.endsWith(".xml")) {
+        baseName = fileName.left(fileName.length() - 4);
+    } else {
+        baseName = reportInfo.completeBaseName(); // Dự phòng
+    }
+
+    // SỬA LỖI: Cải thiện logic tìm file video gốc
     m_currentVideoPath.clear();
+    QString potentialVideoPath = reportInfo.absolutePath() + "/" + baseName;
+    if (QFile::exists(potentialVideoPath)) {
+        m_currentVideoPath = potentialVideoPath;
+        handleLogMessage(QString("[INFO] Đã tìm thấy file video tương ứng: %1").arg(m_currentVideoPath));
+    } else {
+        handleLogMessage(QString("[WARNING] Không tìm thấy file video gốc tại: %1").arg(potentialVideoPath));
+    }
+
+
     m_resultsWidget->clearResults();
     m_progressBar->setValue(0);
-    emit videoFileChanged(QFileInfo(path).fileName());
+    emit videoFileChanged(reportInfo.fileName());
     m_configWidget->setInputPath(path);
 
-    m_statusLabel->setText("Sẵn sàng xem báo cáo đã chọn.");
-    m_currentMode = AnalysisMode::VIEW_REPORT;
-    m_analyzeButton->setText("BẮT ĐẦU PHÂN TÍCH"); // Giữ nguyên văn bản nút
-    m_analyzeButton->setEnabled(true);
+    // CẢI TIẾN: Thêm logic cảnh báo khi nhập trực tiếp file .mkv
+    QString lowerPath = path.toLower();
+    if (lowerPath.endsWith(".mkv") || lowerPath.endsWith(".qctools.mkv")) {
+        if (!m_currentVideoPath.isEmpty()) {
+            // Trường hợp A: Có file .mkv và tìm thấy video gốc
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle("Cảnh báo: Hạn chế của File .mkv");
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText("Bạn đã chọn một file báo cáo .mkv. Do hạn chế của công cụ, việc xem báo cáo từ file này có thể dẫn đến việc phát hiện sai tất cả các frame là lỗi 'Viền Đen'.");
+            msgBox.setInformativeText("Để có kết quả chính xác nhất, bạn nên phân tích lại video. Bạn muốn làm gì?");
+            QPushButton* reanalyzeButton = msgBox.addButton("Phân tích lại (Khuyến nghị)", QMessageBox::ActionRole);
+            QPushButton* viewMkvButton = msgBox.addButton("Vẫn xem báo cáo .mkv", QMessageBox::ActionRole);
+            QPushButton* cancelButton = msgBox.addButton("Hủy", QMessageBox::RejectRole);
+            msgBox.setDefaultButton(reanalyzeButton);
+            msgBox.exec();
+
+            if (msgBox.clickedButton() == reanalyzeButton) {
+                deleteAssociatedReports(m_currentVideoPath);
+                updateStatus("Sẵn sàng phân tích lại video gốc.");
+                m_currentMode = AnalysisMode::ANALYZE_VIDEO;
+                onAnalyzeClicked();
+            } else if (msgBox.clickedButton() == viewMkvButton) {
+                updateStatus("Sẵn sàng xem báo cáo .mkv.");
+                m_currentMode = AnalysisMode::VIEW_REPORT;
+                onAnalyzeClicked();
+            }
+        } else {
+            // Trường hợp B: Có file .mkv nhưng không tìm thấy video gốc
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle("Cảnh báo: Hạn chế của File .mkv");
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText("Bạn đã chọn một file báo cáo .mkv và không tìm thấy file video gốc tương ứng.\n\nViệc xem báo cáo có thể dẫn đến việc phát hiện sai lỗi 'Viền Đen'.");
+            QPushButton* continueButton = msgBox.addButton("Tiếp tục", QMessageBox::AcceptRole);
+            msgBox.addButton("Hủy", QMessageBox::RejectRole);
+            msgBox.exec();
+
+            if (msgBox.clickedButton() == continueButton) {
+                updateStatus("Sẵn sàng xem báo cáo .mkv.");
+                m_currentMode = AnalysisMode::VIEW_REPORT;
+                onAnalyzeClicked();
+            }
+        }
+    } else {
+        // Trường hợp C: Nhập file .xml hoặc .xml.gz (an toàn)
+        updateStatus("Sẵn sàng xem báo cáo đã chọn.");
+        m_currentMode = AnalysisMode::VIEW_REPORT;
+        onAnalyzeClicked();
+    }
 }
 
 
@@ -262,13 +392,13 @@ void VideoWidget::onAnalyzeClicked()
         QMessageBox::warning(this, "Đang xử lý", "Một quá trình khác đang chạy. Vui lòng đợi.");
         return;
     }
-
+    m_analyzeButton->setText("BẮT ĐẦU PHÂN TÍCH");
     m_resultsWidget->clearResults();
-    
+
     QSettings qsettings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
     QVariantMap settings = m_configWidget->getSettings();
     settings[AppConstants::K_QCCLI_PATH] = qsettings.value(AppConstants::K_QCCLI_PATH).toString();
-    
+
     if (settings[AppConstants::K_QCCLI_PATH].toString().isEmpty() || !QFile::exists(settings[AppConstants::K_QCCLI_PATH].toString())) {
         QMessageBox::critical(this, "Lỗi đường dẫn", "Đường dẫn đến qcli.exe không hợp lệ. Vui lòng kiểm tra lại trong Cài đặt Nâng cao.");
         promptForPaths();
@@ -297,7 +427,7 @@ void VideoWidget::onAnalyzeClicked()
 void VideoWidget::onStopClicked()
 {
     if (m_isAnalysisInProgress) {
-        m_statusLabel->setText("Đang yêu cầu dừng...");
+        updateStatus("Đang yêu cầu dừng...");
         m_stopButton->setEnabled(false);
         QMetaObject::invokeMethod(m_qctoolsManager, "requestStop", Qt::DirectConnection);
     }
@@ -311,13 +441,13 @@ void VideoWidget::setAnalysisInProgress(bool inProgress)
     m_stopButton->setEnabled(inProgress);
 
     if (inProgress) {
-        m_statusLabel->setText("Bắt đầu xử lý...");
-        m_progressBar->setRange(0, 0); 
+        updateStatus("Bắt đầu xử lý...");
+        m_progressBar->setRange(0, 100);
         m_progressBar->setValue(0);
-        m_analyzeButton->setEnabled(false); // Vô hiệu hóa nút chính khi đang chạy
+        m_analyzeButton->setEnabled(false);
     } else {
          m_progressBar->setRange(0, 100);
-         m_progressBar->setValue(100);
+         m_progressBar->setValue(0);
          m_analyzeButton->setEnabled(!m_currentVideoPath.isEmpty() || !m_currentReportPath.isEmpty());
     }
 }
@@ -326,8 +456,10 @@ void VideoWidget::onSettingsClicked()
 {
     if(!m_settingsDialog){
         m_settingsDialog = new SettingsDialog(this);
+        // SỬA LỖI: Kết nối tín hiệu reset với slot tương ứng
+        connect(m_settingsDialog, &SettingsDialog::settingsReset, this, &VideoWidget::onSettingsReset);
     }
-    
+
     if(m_settingsDialog->exec() == QDialog::Accepted){
         QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
         QString qctoolsPath = settings.value(AppConstants::K_QCTOOLS_PATH).toString();
@@ -343,7 +475,7 @@ void VideoWidget::onShowLogClicked()
         m_logDialog = new LogDialog(m_logHistory, this);
     }
     m_logDialog->setDefaultSavePath(getCurrentDefaultSaveDir());
-    
+
     QString sourceFile = !m_currentVideoPath.isEmpty() ? m_currentVideoPath : m_currentReportPath;
     m_logDialog->setVideoFileName(QFileInfo(sourceFile).fileName());
 
@@ -357,36 +489,32 @@ void VideoWidget::onResultDoubleClicked(int frameNum)
     if (m_currentFps > 0) {
         QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
         int rewindFrames = settings.value(AppConstants::K_REWIND_FRAMES, 5).toInt();
-        
+
         int newFrame = frameNum - rewindFrames;
         if (newFrame < 0) newFrame = 0;
 
         QString timecode = QCToolsManager::frameToTimecodePrecise(newFrame, m_currentFps);
         QApplication::clipboard()->setText(timecode);
 
-        m_originalStatusText = m_statusLabel->text();
+        if(m_statusResetTimer->isActive()) m_statusResetTimer->stop();
         m_statusLabel->setText(QString("Đã sao chép timecode '%1' (đã lùi %2 frames) vào clipboard!").arg(timecode).arg(rewindFrames));
-        QTimer::singleShot(3000, this, [this](){
-            if(m_statusLabel->text().contains("clipboard")) { // Avoid overwriting new status
-                m_statusLabel->setText(m_originalStatusText);
-            }
-        });
+        m_statusResetTimer->start(3500);
     }
 }
 
 void VideoWidget::onExportTxt()
 {
     const auto& results = m_resultsWidget->getCurrentResults();
-    if (results.isEmpty()){ 
-        QMessageBox::warning(this, "Không có dữ liệu", "Không có dữ liệu để xuất."); 
-        return; 
+    if (results.isEmpty()){
+        QMessageBox::warning(this, "Không có dữ liệu", "Không có dữ liệu để xuất.");
+        return;
     }
-    
+
     QString defaultDir = getCurrentDefaultSaveDir();
     QString sourceFile = !m_currentVideoPath.isEmpty() ? m_currentVideoPath : m_currentReportPath;
     QFileInfo fileInfo(sourceFile);
     QString suggestedName = defaultDir + "/" + fileInfo.fileName() + "_QC_Report.txt";
-    
+
     QString p = QFileDialog::getSaveFileName(this, "Lưu file Text", suggestedName, "Text Files (*.txt)");
 
     if (p.isEmpty()) return;
@@ -410,9 +538,9 @@ void VideoWidget::onExportTxt()
 void VideoWidget::onCopyToClipboard()
 {
     const auto& results = m_resultsWidget->getCurrentResults();
-    if (results.isEmpty()){ 
-        QMessageBox::warning(this, "Không có dữ liệu", "Không có dữ liệu để sao chép."); 
-        return; 
+    if (results.isEmpty()){
+        QMessageBox::warning(this, "Không có dữ liệu", "Không có dữ liệu để sao chép.");
+        return;
     }
     QString s;
     QTextStream ss(&s);
@@ -426,9 +554,12 @@ void VideoWidget::onCopyToClipboard()
 }
 
 
-void VideoWidget::updateStatus(const QString &status){ m_statusLabel->setText(status); }
+void VideoWidget::updateStatus(const QString &status){
+    m_statusLabel->setText(status);
+    m_persistentStatusText = status;
+}
 
-void VideoWidget::updateProgress(int value, int max){ 
+void VideoWidget::updateProgress(int value, int max){
     if (max > 0) {
         if (m_progressBar->maximum() != max) m_progressBar->setRange(0, max);
         m_progressBar->setValue(value);
@@ -442,29 +573,60 @@ void VideoWidget::handleResults(const QList<AnalysisResult> &results){
 
 void VideoWidget::handleAnalysisFinished(bool success) {
     setAnalysisInProgress(false);
-    
+
     if (!success) {
-        if(!m_stopButton->isEnabled()) 
-            m_statusLabel->setText("Tác vụ đã được người dùng dừng.");
+        if(m_stopButton->isEnabled()) // Nếu nút stop chưa bị vô hiệu hóa, tức là lỗi tự xảy ra
+             updateStatus("Đã xảy ra lỗi trong quá trình xử lý.");
+        else // Ngược lại là do người dùng bấm
+             updateStatus("Tác vụ đã được người dùng dừng.");
         m_progressBar->setValue(0);
         return;
     }
-    
-    m_statusLabel->setText("Xử lý hoàn tất!");
+
+    updateStatus("Xử lý hoàn tất!");
+
     QString resultMessage;
-    if (m_resultsWidget->getCurrentResults().isEmpty()) {
+    int errorCount = m_resultsWidget->getCurrentResults().count();
+    if (errorCount == 0) {
         resultMessage = "Quá trình xử lý đã hoàn tất.\nKhông tìm thấy lỗi nào với cấu hình hiện tại.";
     } else {
-        resultMessage = QString("Quá trình xử lý đã hoàn tất.\nTìm thấy %1 lỗi.").arg(m_resultsWidget->getCurrentResults().count());
+        resultMessage = QString("Quá trình xử lý đã hoàn tất.\nTìm thấy %1 lỗi.").arg(errorCount);
     }
 
-    QMessageBox::information(this, "Hoàn tất", resultMessage);
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Hoàn tất");
+    msgBox.setIcon(QMessageBox::Information);
+    msgBox.setText(resultMessage);
+    msgBox.setInformativeText("Bạn có muốn mở kết quả trong QCTools để xem chi tiết không?");
+
+    QPushButton *yesButton = msgBox.addButton("Có", QMessageBox::YesRole);
+    QPushButton *noButton = msgBox.addButton("Không", QMessageBox::NoRole);
+    msgBox.setDefaultButton(noButton);
+
+    msgBox.exec();
+
+    if (msgBox.clickedButton() == yesButton) {
+        QString fileToOpen;
+        if (!m_currentVideoPath.isEmpty()) {
+            fileToOpen = m_currentVideoPath;
+        } else if (!m_currentReportPath.isEmpty()) {
+            fileToOpen = m_currentReportPath;
+        }
+
+        if (!fileToOpen.isEmpty()) {
+            handleLogMessage(QString("[INFO] Người dùng yêu cầu mở '%1' trong QCTools.").arg(QFileInfo(fileToOpen).fileName()));
+            m_qctoolsController->startAndOpenFile(fileToOpen);
+        } else {
+            handleLogMessage("[WARNING] Không thể mở QCTools vì không có đường dẫn video hay báo cáo.");
+            QMessageBox::warning(this, "Không thể mở", "Không tìm thấy file video hay file báo cáo để mở.");
+        }
+    }
 }
 
 void VideoWidget::handleError(const QString &error) {
     setAnalysisInProgress(false);
     QMessageBox::critical(this, "Lỗi Xử Lý", error);
-    m_statusLabel->setText("Đã xảy ra lỗi nghiêm trọng!");
+    updateStatus("Đã xảy ra lỗi nghiêm trọng!");
     m_progressBar->setValue(0);
 }
 
@@ -478,9 +640,20 @@ void VideoWidget::handleLogMessage(const QString &message)
 
 void VideoWidget::handleBackgroundTaskFinished(const QString &message)
 {
-    m_statusLabel->setText(message);
+    updateStatus(message);
     handleLogMessage(QString("[INFO] %1").arg(message));
 }
+
+void VideoWidget::handleMediaInfo(const MediaInfo &info)
+{
+    m_currentFps = info.fps;
+    QString sourceFile = !m_currentVideoPath.isEmpty() ? m_currentVideoPath : m_currentReportPath;
+    handleLogMessage("\n==================== THÔNG TIN FILE ====================");
+    handleLogMessage(QString(" File: %1").arg(QFileInfo(sourceFile).fileName()));
+    handleLogMessage(info.toFormattedString());
+    handleLogMessage("====================================================\n");
+}
+
 
 QString VideoWidget::getCurrentDefaultSaveDir() const
 {
@@ -492,4 +665,28 @@ QString VideoWidget::getCurrentDefaultSaveDir() const
     return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
 }
 
+void VideoWidget::onStatusResetTimeout()
+{
+    m_statusLabel->setText(m_persistentStatusText);
+}
+
+// SỬA LỖI: Hàm mới để xử lý việc reset cài đặt mà không cần khởi động lại
+void VideoWidget::onSettingsReset()
+{
+    handleLogMessage("[INFO] Cài đặt đã được reset về mặc định.");
+
+    // 1. Tải lại các cài đặt trên giao diện chính (ConfigWidget)
+    m_configWidget->reloadSettings();
+
+    // 2. Cập nhật lại đường dẫn cho QCToolsController
+    QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
+    QString qctoolsPath = settings.value(AppConstants::K_QCTOOLS_PATH).toString();
+    QString qccliPath = settings.value(AppConstants::K_QCCLI_PATH).toString();
+    m_qctoolsController->updatePaths(qctoolsPath, qccliPath);
+
+    // 3. Nhắc nhở người dùng thiết lập lại đường dẫn nếu cần
+    if (qctoolsPath.isEmpty() || qccliPath.isEmpty()) {
+        promptForPaths();
+    }
+}
 

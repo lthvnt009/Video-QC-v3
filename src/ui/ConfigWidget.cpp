@@ -28,6 +28,12 @@ void ConfigWidget::setInputPath(const QString &path)
     m_videoPathEdit->setText(QDir::toNativeSeparators(path));
 }
 
+// CẢI TIẾN: Slot mới để tải lại cài đặt khi cần
+void ConfigWidget::reloadSettings()
+{
+    loadSettings();
+}
+
 void ConfigWidget::setupUI()
 {
     QVBoxLayout *mainLayout = new QVBoxLayout(this);

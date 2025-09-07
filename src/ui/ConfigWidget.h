@@ -20,6 +20,9 @@ public:
     QVariantMap getSettings() const;
     void setInputPath(const QString& path);
 
+public slots:
+    void reloadSettings(); // Slot mới để tải lại cài đặt từ bên ngoài
+
 signals:
     void filePathSelected(const QString &path);
     void reportPathSelected(const QString &path);

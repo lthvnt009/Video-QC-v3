@@ -1,6 +1,6 @@
 // src/ui/resultswidget.cpp
 #include "resultswidget.h"
-#include "core/Constants.h" // BƯỚC 1.4: Thêm file header mới
+#include "core/Constants.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -23,14 +23,14 @@ void ResultsWidget::setupUI()
 {
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0,0,0,0);
-    
+
     QGroupBox *resultsBox = new QGroupBox();
     QVBoxLayout *resultsLayout = new QVBoxLayout(resultsBox);
 
     QWidget *titleWidget = new QWidget();
     QHBoxLayout *titleLayout = new QHBoxLayout(titleWidget);
     titleLayout->setContentsMargins(0,0,0,0);
-    
+
     QLabel *titleLabel = new QLabel("<b>Kết quả Phân tích</b>");
     m_filterBlackFramesCheck = new QCheckBox("Frame Đen");
     m_filterBlackBordersCheck = new QCheckBox("Viền Đen");
@@ -46,7 +46,7 @@ void ResultsWidget::setupUI()
     titleLayout->addWidget(m_filterBlackFramesCheck);
     titleLayout->addWidget(m_filterBlackBordersCheck);
     titleLayout->addWidget(m_filterOrphanFramesCheck);
-    
+
     connect(m_filterBlackFramesCheck, &QCheckBox::stateChanged, this, &ResultsWidget::onFilterChanged);
     connect(m_filterBlackBordersCheck, &QCheckBox::stateChanged, this, &ResultsWidget::onFilterChanged);
     connect(m_filterOrphanFramesCheck, &QCheckBox::stateChanged, this, &ResultsWidget::onFilterChanged);
@@ -54,8 +54,7 @@ void ResultsWidget::setupUI()
     resultsLayout->addWidget(titleWidget);
 
     m_resultsTreeView = new QTreeView;
-    m_resultsModel = new QStandardItemModel(0, 5, this); 
-    // SỬA ĐỔI: Đảm bảo tên cột chính xác
+    m_resultsModel = new QStandardItemModel(0, 5, this);
     m_resultsModel->setHorizontalHeaderLabels({"Timecode", "Thời lượng (frames)", "Loại lỗi", "Chi tiết", "ID"});
     m_resultsTreeView->setModel(m_resultsModel);
     m_resultsTreeView->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -72,9 +71,10 @@ void ResultsWidget::setupUI()
     resultsLayout->addWidget(m_resultsTreeView);
 
     QHBoxLayout *bottomButtonsLayout = new QHBoxLayout;
-    
-    m_settingsButton = new QPushButton("⚙️ Cài đặt Nâng cao");
-    m_settingsButton->setToolTip("Mở cài đặt nâng cao (ngưỡng thay đổi cảnh, tăng tốc phần cứng...)");
+
+    // VIỆT HÓA: Thay đổi văn bản và tooltip của nút
+    m_settingsButton = new QPushButton("⚙️ Cài đặt");
+    m_settingsButton->setToolTip("Mở cài đặt (đường dẫn, ngưỡng lỗi...)");
     connect(m_settingsButton, &QPushButton::clicked, this, &ResultsWidget::settingsClicked);
 
     m_exportTxtButton = new QPushButton("Xuất TXT");
@@ -86,7 +86,7 @@ void ResultsWidget::setupUI()
     bottomButtonsLayout->addStretch();
     bottomButtonsLayout->addWidget(m_exportTxtButton);
     bottomButtonsLayout->addWidget(m_copyButton);
-    
+
     resultsLayout->addLayout(bottomButtonsLayout);
 
     mainLayout->addWidget(resultsBox);
@@ -118,14 +118,14 @@ void ResultsWidget::updateResultsView()
         if (res.errorType == AppConstants::ERR_BLACK_FRAME && showBlackFrames) shouldShow = true;
         else if (res.errorType == AppConstants::ERR_BLACK_BORDER && showBlackBorders) shouldShow = true;
         else if (res.errorType == AppConstants::ERR_ORPHAN_FRAME && showOrphanFrames) shouldShow = true;
-        
+
         if (shouldShow) {
             QList<QStandardItem *> rowItems;
             rowItems.append(new QStandardItem(res.timecode));
             rowItems.append(new QStandardItem(res.duration));
             rowItems.append(new QStandardItem(res.errorType));
             rowItems.append(new QStandardItem(res.details));
-            rowItems.append(new QStandardItem(QString::number(res.id))); 
+            rowItems.append(new QStandardItem(QString::number(res.id)));
             m_resultsModel->appendRow(rowItems);
         }
     }
@@ -134,7 +134,7 @@ void ResultsWidget::updateResultsView()
 void ResultsWidget::onTreeViewDoubleClicked(const QModelIndex &index)
 {
     if (!index.isValid()) return;
-    
+
     QModelIndex idIndex = m_resultsModel->index(index.row(), 4);
     bool ok;
     int resultId = m_resultsModel->data(idIndex).toInt(&ok);
@@ -152,10 +152,10 @@ void ResultsWidget::handleResults(const QList<AnalysisResult> &newResults)
 {
     m_currentResults.clear();
     m_currentResults.append(newResults);
-    std::sort(m_currentResults.begin(), m_currentResults.end(), [](const auto& a, const auto& b){ 
-        return a.startFrame < b.startFrame; 
+    std::sort(m_currentResults.begin(), m_currentResults.end(), [](const auto& a, const auto& b){
+        return a.startFrame < b.startFrame;
     });
-    
+
     updateResultsView();
     updateButtonStates();
 }
@@ -163,7 +163,7 @@ void ResultsWidget::handleResults(const QList<AnalysisResult> &newResults)
 void ResultsWidget::clearResults()
 {
     m_currentResults.clear();
-    updateResultsView(); 
+    updateResultsView();
     updateButtonStates();
 }
 
@@ -171,4 +171,3 @@ const QList<AnalysisResult>& ResultsWidget::getCurrentResults() const
 {
     return m_currentResults;
 }
-

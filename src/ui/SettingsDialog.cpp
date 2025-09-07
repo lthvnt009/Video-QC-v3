@@ -18,7 +18,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 
-const QString APP_VERSION = "2.0"; // Cập nhật phiên bản
+const QString APP_VERSION = "2.1";
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
@@ -35,7 +35,8 @@ void SettingsDialog::openPathsTab()
 
 void SettingsDialog::setupUI()
 {
-    setWindowTitle("Cài đặt Nâng cao");
+    // VIỆT HÓA: Thay đổi tiêu đề cửa sổ
+    setWindowTitle("Cài đặt");
     setMinimumWidth(550);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -57,7 +58,7 @@ void SettingsDialog::setupUI()
 
     m_qcliPathEdit = new QLineEdit(this);
     m_qcliPathEdit->setPlaceholderText("Sẽ được tự động điền");
-    m_qcliPathEdit->setReadOnly(true); 
+    m_qcliPathEdit->setReadOnly(true);
     QPushButton *browseQCCliButton = new QPushButton("Duyệt...");
     browseQCCliButton->setToolTip("Chỉ sử dụng nếu qcli.exe không nằm cùng thư mục với QCTools.exe");
     QHBoxLayout *qcliLayout = new QHBoxLayout();
@@ -73,15 +74,15 @@ void SettingsDialog::setupUI()
     QVBoxLayout *aboutLayout = new QVBoxLayout(aboutTab);
     QLabel *aboutLabel = new QLabel(
         QString("<b>Video QC Tool v%1</b><br><br>"
-                "Bảng điều khiển này được thiết kế để hoạt động cùng với <b>QCTools & qcli</b>.<br>"
+                "Bảng điều khiển này được thiết kế để hoạt động cùng với <b>QCTools</b>.<br>"
                 "Nó sẽ ra lệnh cho qcli thực hiện phân tích tự động theo các bộ lọc đã chọn.<br><br>"
-                "<b>Yêu cầu:</b> QCTools và qcli (v1.4.2 hoặc tương thích) phải được cài đặt trên hệ thống."
+                "<b>Yêu cầu:</b> QCTools (v1.4.2 hoặc tương thích) phải được cài đặt trên hệ thống."
                ).arg(APP_VERSION)
     );
     aboutLabel->setWordWrap(true);
     aboutLayout->addWidget(aboutLabel);
     aboutLayout->addStretch();
-    
+
     // --- Interaction Tab ---
     QWidget *interactionTab = new QWidget();
     QFormLayout *interactionLayout = new QFormLayout(interactionTab);
@@ -108,8 +109,7 @@ void SettingsDialog::setupUI()
     hwLayout->addRow(m_hwAccelCheck);
     hwLayout->addRow("Phương pháp giải mã:", m_hwAccelTypeCombo);
     connect(m_hwAccelCheck, &QCheckBox::toggled, m_hwAccelTypeCombo, &QComboBox::setEnabled);
-    
-    // Vô hiệu hóa tính năng
+
     m_hwAccelCheck->setEnabled(false);
     m_hwAccelTypeCombo->setEnabled(false);
 
@@ -117,10 +117,13 @@ void SettingsDialog::setupUI()
     m_tabWidget->addTab(hwTab, "Tăng tốc P.cứng");
     m_tabWidget->addTab(interactionTab, "Tương tác");
     m_tabWidget->addTab(aboutTab, "Giới thiệu");
-    
+
     QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    m_resetButton = buttonBox->addButton("Đặt lại về Mặc định", QDialogButtonBox::ResetRole);
+
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(m_resetButton, &QPushButton::clicked, this, &SettingsDialog::onResetToDefaultsClicked);
     connect(this, &QDialog::accepted, this, &SettingsDialog::saveSettings);
 
     mainLayout->addWidget(m_tabWidget);
@@ -136,7 +139,7 @@ void SettingsDialog::loadSettings()
     m_hwAccelCheck->setChecked(settings.value(AppConstants::K_USE_HW_ACCEL, false).toBool());
     m_hwAccelTypeCombo->setCurrentText(settings.value(AppConstants::K_HW_ACCEL_TYPE, "auto").toString());
     m_hwAccelTypeCombo->setEnabled(m_hwAccelCheck->isChecked());
-    
+
     m_rewindFramesSpinBox->setValue(settings.value(AppConstants::K_REWIND_FRAMES, 5).toInt());
 }
 
@@ -165,14 +168,14 @@ void SettingsDialog::onBrowseQCTools()
     QString filePath = QFileDialog::getOpenFileName(this, "Chọn file QCTools.exe", "C:/Program Files/", "Executable (*.exe)");
     if(!filePath.isEmpty()) {
         m_qctoolsPathEdit->setText(QDir::toNativeSeparators(filePath));
-        
+
         QFileInfo qctoolsInfo(filePath);
         QString cliPath = qctoolsInfo.absolutePath() + "/qcli.exe";
         if (QFile::exists(cliPath)) {
             m_qcliPathEdit->setText(QDir::toNativeSeparators(cliPath));
         } else {
-            m_qcliPathEdit->clear(); // Xóa đường dẫn cũ nếu không tìm thấy
-            QMessageBox::warning(this, "Không tìm thấy qcli.exe", 
+            m_qcliPathEdit->clear();
+            QMessageBox::warning(this, "Không tìm thấy qcli.exe",
                                  QString("Không tìm thấy file qcli.exe trong cùng thư mục với QCTools.exe.\n\n"
                                          "Đã tìm ở: %1\n\n"
                                          "Vui lòng chọn đường dẫn qcli.exe thủ công.")
@@ -189,4 +192,25 @@ void SettingsDialog::onBrowseQCCli()
     }
 }
 
+void SettingsDialog::onResetToDefaultsClicked()
+{
+    // Hộp thoại 1: Xác nhận
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Xác nhận Đặt lại",
+                                  "Bạn có chắc chắn muốn đặt lại TẤT CẢ cài đặt về giá trị mặc định không?\n"
+                                  "Hành động này không thể hoàn tác.",
+                                  QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
+        settings.clear();
+        loadSettings();
+
+        // Hộp thoại 2: Thông báo hoàn tất
+        QMessageBox::information(this, "Hoàn tất", "Đã đặt lại cài đặt về mặc định.\nCác thay đổi đã được áp dụng ngay lập tức.");
+        
+        // Phát tín hiệu SAU KHI các hộp thoại đã hiển thị xong
+        // để các thành phần khác cập nhật và hiển thị hộp thoại thứ 3 (nếu cần)
+        emit settingsReset();
+    }
+}
 

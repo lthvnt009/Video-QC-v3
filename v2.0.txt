@@ -1,0 +1,9 @@
+Dưới đây là kế hoạch đã được xác nhận:
+
+Bước 1: Lập kế hoạch:
+
+Phân tích: Chỉnh sửa logic trong videowidget.cpp để hiển thị cảnh báo đặc biệt khi phát hiện file .mkv. Sửa lỗi đặt tên file trong QCToolsManager.cpp.
+
+Mục tiêu: Cung cấp cho người dùng cảnh báo rõ ràng và lựa chọn hành động phù hợp, đồng thời sửa lỗi nền để chương trình hoạt động ổn định hơn.
+
+Bước 2: Cung cấp mã nguồn: Tôi sẽ cung cấp hai tệp đã được chỉnh sửa hoàn chỉnh là videowidget.cpp và QCToolsManager.cpp.

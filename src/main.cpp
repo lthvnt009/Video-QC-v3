@@ -2,17 +2,17 @@
 #include "mainwindow.h"
 #include <QApplication>
 #include <QIcon>
-#include "core/Constants.h" // BƯỚC 1.4: Thêm file header mới
+#include "core/Constants.h"
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
 
-    // BƯỚC 1.4: Sử dụng hằng số thay vì "magic strings"
     QCoreApplication::setOrganizationName(AppConstants::ORG_NAME);
     QCoreApplication::setApplicationName(AppConstants::APP_NAME); 
 
-    a.setWindowIcon(QIcon(":/magnifying-glass.ico"));
+    // CẢI TIẾN: Sử dụng icon từ file tài nguyên mới
+    a.setWindowIcon(QIcon(":/app_icon.ico"));
 
     MainWindow w;
     w.show();

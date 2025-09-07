@@ -6,9 +6,10 @@
 #include <QVariantMap>
 #include <atomic>
 #include "core/types.h"
+#include "core/media_info.h" // CẢI TIẾN: Thêm header mới
 #include <QProcess>
 #include <memory>
-#include <QTime> // Sửa lỗi: Thêm header cần thiết
+#include <QTime> 
 
 class QTemporaryDir;
 class QXmlStreamReader;
@@ -25,7 +26,6 @@ public:
     enum class ReportType { GZ, MKV, XML };
     QString getReportPath(ReportType type) const;
 
-    // Sửa lỗi LNK2019: Chuyển định nghĩa của các hàm static vào header và khai báo inline
     inline static QString frameToTimecodePrecise(int frame, double fps) {
         if (fps <= 0 || frame < 0) return "00:00:00.000";
         double totalSeconds = frame / fps;
@@ -57,7 +57,7 @@ signals:
     void errorOccurred(const QString &error);
     void logMessage(const QString& message);
     void backgroundTaskFinished(const QString& message);
-    void videoInfoReady(double fps); 
+    void mediaInfoReady(const MediaInfo& info); // CẢI TIẾN: Tín hiệu mới
 
 public slots:
     void doWork(const QString &filePath, const QVariantMap &settings);
@@ -74,10 +74,11 @@ private:
     void startMkvGeneration();
     void extractFromMkv(const QString& mkvPath);
     void cleanup();
+    void resetState();
     QString createReportDirectory();
     
     void parseReport(const QString &reportPath);
-    bool parseVideoMetadata(QXmlStreamReader& xml);
+    MediaInfo parseMediaInfo(QXmlStreamReader& xml); // CẢI TIẾN: Hàm mới
     QList<FrameData> extractAllFrameData(QXmlStreamReader& xml);
     QList<AnalysisResult> runErrorDetection(const QList<FrameData>& allFramesData);
     QMap<int, QSet<QString>> tagFramesForErrors(const QList<FrameData>& allFramesData);
@@ -107,9 +108,9 @@ private:
     std::atomic<bool> m_stopRequested{false};
     QString m_processBuffer;
     bool m_isGeneratingReport = false;
+    
     QString m_currentPhase; 
     int m_currentStep = 0;
-    
     const int m_totalStepsAnalyze = 6;
     const int m_totalStepsViewReport = 5;
     int m_totalSteps = 0;

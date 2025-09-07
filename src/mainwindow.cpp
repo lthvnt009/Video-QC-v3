@@ -12,7 +12,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_videoWidget = new VideoWidget(this);
     setCentralWidget(m_videoWidget);
     
-    setWindowTitle("Bảng điều khiển QC");
+    setWindowTitle("Video QC Tool");
     setMinimumSize(500, 650);
     resize(500, 750);
 
@@ -26,7 +26,7 @@ MainWindow::~MainWindow() {}
 
 void MainWindow::updateWindowTitle(const QString& videoName)
 {
-    QString baseTitle = "Bảng điều khiển QC";
+    QString baseTitle = "Video QC Tool";
     if (videoName.isEmpty()) {
         setWindowTitle(baseTitle);
     } else {

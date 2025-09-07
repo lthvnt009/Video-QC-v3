@@ -6,17 +6,19 @@
 #include <QThread>
 #include <QStringList>
 #include "core/types.h"
+#include "qctools/QCToolsManager.h"
 
 class QProgressBar;
 class QLabel;
 class QStackedWidget;
 class QPushButton;
+class QTimer;
 class ConfigWidget;
 class ResultsWidget;
 class SettingsDialog;
-class QCToolsManager;
 class QCToolsController;
 class LogDialog;
+struct MediaInfo;
 
 class VideoWidget : public QWidget
 {
@@ -43,6 +45,8 @@ private slots:
     void onShowLogClicked();
     void onControllerError(const QString& message);
     void onResultDoubleClicked(int frameNum);
+    void onStatusResetTimeout();
+    void onSettingsReset(); // Slot mới để xử lý việc reset cài đặt
 
     void updateStatus(const QString &status);
     void updateProgress(int value, int max);
@@ -51,6 +55,7 @@ private slots:
     void handleError(const QString &error);
     void handleLogMessage(const QString& message);
     void handleBackgroundTaskFinished(const QString& message);
+    void handleMediaInfo(const MediaInfo& info);
 
 
 private:
@@ -60,7 +65,9 @@ private:
     void setupConnections();
     void setAnalysisInProgress(bool inProgress);
     void promptForPaths();
-    QString findExistingReport(const QString& videoPath) const;
+    
+    QString findExistingReport(const QString& videoPath, QCToolsManager::ReportType type) const;
+    void deleteAssociatedReports(const QString& videoPath);
     QString getCurrentDefaultSaveDir() const;
 
     // UI Elements
@@ -74,6 +81,7 @@ private:
     QPushButton *m_stopButton;
     QProgressBar *m_progressBar;
     QLabel *m_statusLabel;
+    QTimer* m_statusResetTimer = nullptr;
     
     // Backend
     QThread *m_analysisThread;
@@ -87,8 +95,7 @@ private:
     bool m_isAnalysisInProgress = false;
     QStringList m_logHistory;
     double m_currentFps = 0.0;
-    QString m_originalStatusText;
+    QString m_persistentStatusText;
 };
 
 #endif // VIDEOWIDGET_H
-

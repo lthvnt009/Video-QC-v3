@@ -23,9 +23,13 @@ public:
     QVariantMap getSettings() const;
     void openPathsTab();
 
+signals:
+    void settingsReset(); // Tín hiệu mới để thông báo cài đặt đã được reset
+
 private slots:
     void onBrowseQCTools();
     void onBrowseQCCli();
+    void onResetToDefaultsClicked();
 
 private:
     void setupUI();
@@ -45,7 +49,9 @@ private:
     // Hardware Tab
     QCheckBox* m_hwAccelCheck;
     QComboBox* m_hwAccelTypeCombo;
+
+    // Buttons
+    QPushButton* m_resetButton;
 };
 
 #endif // SETTINGSDIALOG_H
-
