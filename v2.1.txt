@@ -1,0 +1,4 @@
+- thay đổi cách sắp xếp nút tăng giảm ô nhập tham số
+- thống nhất chiều ngang các ô nhập tham số
+- thêm nhập và xuất cấu hình phân tích
+- di chuyển các nút điều khiển ở Nhật ký xuống dưới
