@@ -1,6 +1,9 @@
 <!DOCTYPE RCC><RCC version="1.0">
 <qresource prefix="/">
     <file>app_icon.ico</file>
+    <file>ui/stylesheet.qss</file>
+    <file>ui/icons/arrow_down.svg</file>
+    <file>ui/icons/arrow_up.svg</file>
 </qresource>
 </RCC>
 

@@ -10,6 +10,7 @@ class QGroupBox;
 class QSpinBox;
 class QDoubleSpinBox;
 class QCheckBox;
+class QPushButton; // Thêm khai báo QPushButton
 
 class ConfigWidget : public QWidget
 {
@@ -19,9 +20,10 @@ public:
     explicit ConfigWidget(QWidget *parent = nullptr);
     QVariantMap getSettings() const;
     void setInputPath(const QString& path);
+    void setSettings(const QVariantMap& settings); // Hàm mới để áp dụng cài đặt từ bên ngoài
 
 public slots:
-    void reloadSettings(); // Slot mới để tải lại cài đặt từ bên ngoài
+    void reloadSettings();
 
 signals:
     void filePathSelected(const QString &path);
@@ -30,6 +32,9 @@ signals:
 private slots:
     void onSelectFileClicked();
     void onSelectReportClicked();
+    // Slots mới cho tính năng preset
+    void onSavePresetClicked();
+    void onLoadPresetClicked();
 
 private:
     void setupUI();
@@ -43,6 +48,10 @@ private:
     QGroupBox* m_blackFrameBox;
     QGroupBox* m_blackBorderBox;
     QGroupBox* m_orphanFrameBox;
+
+    // --- Preset Buttons (Mới) ---
+    QPushButton* m_savePresetButton;
+    QPushButton* m_loadPresetButton;
     
     // --- Thresholds ---
     // Black Frames

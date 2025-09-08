@@ -1,4 +1,4 @@
-// src/ui/resultswidget.h (v7.2 - UI Refinements)
+// src/ui/resultswidget.h (Đã cải tiến theo Yêu cầu #2)
 #ifndef RESULTSWIDGET_H
 #define RESULTSWIDGET_H
 
@@ -10,7 +10,10 @@
 class QTreeView;
 class QStandardItemModel;
 class QPushButton;
-class QCheckBox; // Thêm QCheckBox
+class QCheckBox;
+class QMenu;
+class QAction;
+class ClickableHeaderView; // Thêm lớp header tùy chỉnh
 
 class ResultsWidget : public QWidget
 {
@@ -22,6 +25,9 @@ public:
     void clearResults();
     const QList<AnalysisResult>& getCurrentResults() const;
 
+public slots:
+    void setCurrentFps(double fps);
+
 signals:
     void exportTxtClicked();
     void copyToClipboardClicked();
@@ -30,27 +36,38 @@ signals:
 
 private slots:
     void onTreeViewDoubleClicked(const QModelIndex &index);
-    void onFilterChanged(); // Slot mới để xử lý việc lọc kết quả
+    void onDisplayOptionsChanged(); 
+    // Slot mới để xử lý click vào header
+    void onHeaderClicked(int logicalIndex, const QPoint& pos);
+    // Slot mới để xử lý khi một định dạng được chọn từ menu
+    void onTimecodeFormatSelected(QAction* action);
+
 
 private:
     void setupUI();
-    void updateResultsView(); // Hàm mới để cập nhật bảng kết quả
-    void updateButtonStates(); // C-04: Hàm mới để cập nhật trạng thái nút
+    void setupTimecodeMenu(); // Hàm mới để khởi tạo menu
+    void updateResultsView(); 
+    void updateButtonStates();
+    QString getFormattedTime(const AnalysisResult& res) const;
 
     // UI Elements
     QTreeView *m_resultsTreeView;
+    ClickableHeaderView *m_headerView; // Sử dụng header tùy chỉnh
     QStandardItemModel *m_resultsModel;
     QPushButton *m_settingsButton;
     QPushButton *m_exportTxtButton;
     QPushButton *m_copyButton;
 
-    // CẢI TIẾN: Thêm các checkbox để lọc
+    // Loại bỏ QComboBox, thay bằng QMenu
+    QMenu* m_timecodeFormatMenu;
     QCheckBox *m_filterBlackFramesCheck;
     QCheckBox *m_filterBlackBordersCheck;
     QCheckBox *m_filterOrphanFramesCheck;
 
     // State
     QList<AnalysisResult> m_currentResults; // Dữ liệu gốc
+    double m_currentFps = 0.0;
+    int m_currentTimecodeFormat = 0; // Lưu trạng thái định dạng hiện tại
 };
 
 #endif // RESULTSWIDGET_H

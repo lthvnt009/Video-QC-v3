@@ -1,4 +1,4 @@
-// src/qctools/QCToolsManager.h
+// src/qctools/QCToolsManager.h (Cải tiến Bước 1)
 #ifndef QCTOOLSMANAGER_H
 #define QCTOOLSMANAGER_H
 
@@ -6,12 +6,15 @@
 #include <QVariantMap>
 #include <atomic>
 #include "core/types.h"
-#include "core/media_info.h" // CẢI TIẾN: Thêm header mới
+#include "core/media_info.h"
 #include <QProcess>
 #include <memory>
-#include <QTime> 
+#include <QTime>
+#include <QFile>
+#include <zlib.h>
 
 class QTemporaryDir;
+class QTemporaryFile;
 class QXmlStreamReader;
 struct FrameData;
 
@@ -22,10 +25,11 @@ class QCToolsManager : public QObject
 public:
     explicit QCToolsManager(QObject *parent = nullptr);
     ~QCToolsManager();
-    
+
     enum class ReportType { GZ, MKV, XML };
     QString getReportPath(ReportType type) const;
 
+    // --- CÁC HÀM TIỆN ÍCH CHUYỂN ĐỔI THỜI GIAN ---
     inline static QString frameToTimecodePrecise(int frame, double fps) {
         if (fps <= 0 || frame < 0) return "00:00:00.000";
         double totalSeconds = frame / fps;
@@ -46,6 +50,17 @@ public:
             .arg(seconds, 2, 10, QChar('0'))
             .arg(frameOfSecond, 2, 10, QChar('0'));
     }
+    
+    // CẢI TIẾN: Thêm các hàm chuyển đổi mới theo yêu cầu
+    inline static QString frameToSecondsString(int frame, double fps) {
+        if (fps <= 0 || frame < 0) return "0.00";
+        return QString::number(frame / fps, 'f', 2);
+    }
+    
+    inline static QString frameToMinutesString(int frame, double fps) {
+        if (fps <= 0 || frame < 0) return "0.00";
+        return QString::number(frame / fps / 60.0, 'f', 2);
+    }
 
 
 signals:
@@ -57,7 +72,7 @@ signals:
     void errorOccurred(const QString &error);
     void logMessage(const QString& message);
     void backgroundTaskFinished(const QString& message);
-    void mediaInfoReady(const MediaInfo& info); // CẢI TIẾN: Tín hiệu mới
+    void mediaInfoReady(const MediaInfo& info);
 
 public slots:
     void doWork(const QString &filePath, const QVariantMap &settings);
@@ -71,14 +86,19 @@ private slots:
     void readAnalysisOutput();
 
 private:
+    // CẢI TIẾN: Các hàm giải nén giờ là hàm nội bộ, không phải slot
+    void decompressGzFile(const QString& gzPath);
+    bool processDecompressionChunk(Bytef* in, Bytef* out);
+
     void startMkvGeneration();
     void extractFromMkv(const QString& mkvPath);
     void cleanup();
     void resetState();
     QString createReportDirectory();
     
-    void parseReport(const QString &reportPath);
-    MediaInfo parseMediaInfo(QXmlStreamReader& xml); // CẢI TIẾN: Hàm mới
+    bool parseReport(QIODevice* device); // CẢI TIẾN: Nhận QIODevice để xử lý file thường và file tạm
+    
+    MediaInfo parseMediaInfo(QXmlStreamReader& xml);
     QList<FrameData> extractAllFrameData(QXmlStreamReader& xml);
     QList<AnalysisResult> runErrorDetection(const QList<FrameData>& allFramesData);
     QMap<int, QSet<QString>> tagFramesForErrors(const QList<FrameData>& allFramesData);
@@ -95,7 +115,7 @@ private:
     QString m_reportDir;
 
     QString m_filePath;
-    QString m_sourceReportPath; 
+    QString m_sourceReportPath;
     QVariantMap m_settings;
     QString m_qcliPath;
 
@@ -108,8 +128,8 @@ private:
     std::atomic<bool> m_stopRequested{false};
     QString m_processBuffer;
     bool m_isGeneratingReport = false;
-    
-    QString m_currentPhase; 
+
+    QString m_currentPhase;
     int m_currentStep = 0;
     const int m_totalStepsAnalyze = 6;
     const int m_totalStepsViewReport = 5;
@@ -117,4 +137,3 @@ private:
 };
 
 #endif // QCTOOLSMANAGER_H
-

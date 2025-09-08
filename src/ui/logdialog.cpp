@@ -10,7 +10,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QMessageBox>
-#include <QScrollBar> // SỬA LỖI: Thêm header cho QScrollBar
+#include <QScrollBar>
 
 LogDialog::LogDialog(const QStringList& history, QWidget *parent)
     : QDialog(parent)
@@ -31,16 +31,18 @@ void LogDialog::setupUI()
 
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     m_copyButton = new QPushButton("Sao chép vào Clipboard");
-    m_exportButton = new QPushButton("Xuất ra TXT...");
-    m_clearButton = new QPushButton("Xóa Log");
+    m_exportButton = new QPushButton("Xuất TXT");
+    m_clearButton = new QPushButton("Xóa Nhật ký");
     
-    buttonLayout->addWidget(m_copyButton);
-    buttonLayout->addWidget(m_exportButton);
-    buttonLayout->addStretch();
-    buttonLayout->addWidget(m_clearButton);
+    // CẢI TIẾN: Sắp xếp lại vị trí các nút theo yêu cầu
+    buttonLayout->addWidget(m_clearButton);     // Ngoài cùng bên trái
+    buttonLayout->addStretch();                 // Thêm khoảng trống co giãn
+    buttonLayout->addWidget(m_exportButton);    // Bên phải
+    buttonLayout->addWidget(m_copyButton);      // Ngoài cùng bên phải
 
-    mainLayout->addLayout(buttonLayout);
+    // CẢI TIẾN: Di chuyển hàng nút xuống dưới cùng
     mainLayout->addWidget(m_logEdit);
+    mainLayout->addLayout(buttonLayout);
 
     connect(m_copyButton, &QPushButton::clicked, this, &LogDialog::onCopyClicked);
     connect(m_exportButton, &QPushButton::clicked, this, &LogDialog::onExportClicked);
@@ -92,5 +94,11 @@ void LogDialog::onExportClicked()
 
 void LogDialog::onClearClicked()
 {
-    m_logEdit->clear();
+    // Thêm hộp thoại xác nhận trước khi xóa
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Xác nhận Xóa", "Bạn có chắc chắn muốn xóa toàn bộ nội dung nhật ký không?",
+                                  QMessageBox::Yes|QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        m_logEdit->clear();
+    }
 }

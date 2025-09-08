@@ -1,4 +1,4 @@
-// src/qctools/QCToolsManager.cpp
+// src/qctools/QCToolsManager.cpp (Cải tiến Bước 1)
 #include "QCToolsManager.h"
 #include "core/Constants.h"
 #include <QProcess>
@@ -16,7 +16,7 @@
 #include <optional>
 #include <QSet>
 #include <QMap>
-#include <memory> 
+#include <memory>
 
 // =============================================================================
 // DATA STRUCTURES & INTERNAL UTILITY FUNCTIONS
@@ -70,78 +70,6 @@ static QString formatCropDetails(const CropValues& min_vals, const CropValues& m
     return parts.join(", ");
 }
 
-#define CHUNK 16384 // Use 16KB buffer
-static std::shared_ptr<QTemporaryFile> decompressGzFile(const QString& gzPath)
-{
-    QFile gzFile(gzPath);
-    if (!gzFile.open(QIODevice::ReadOnly)) {
-        qWarning() << "Cannot open gzipped file for reading:" << gzPath;
-        return nullptr;
-    }
-
-    auto outFile = std::make_shared<QTemporaryFile>();
-    if (!outFile->open()) {
-        qWarning() << "Could not open temporary file for writing decompressed data.";
-        return nullptr;
-    }
-
-    z_stream strm;
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-    strm.avail_in = 0;
-    strm.next_in = Z_NULL;
-    if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK) {
-        qWarning() << "Zlib inflateInit2 failed!";
-        return nullptr;
-    }
-
-    Bytef in[CHUNK];
-    Bytef out[CHUNK];
-    int ret = Z_OK;
-
-    do {
-        strm.avail_in = gzFile.read(reinterpret_cast<char*>(in), CHUNK);
-        if (strm.avail_in < 0) {
-            (void)inflateEnd(&strm);
-            qWarning() << "Error reading from gzipped file:" << gzFile.errorString();
-            return nullptr;
-        }
-        if (strm.avail_in == 0)
-            break;
-        strm.next_in = in;
-
-        do {
-            strm.avail_out = CHUNK;
-            strm.next_out = out;
-            ret = inflate(&strm, Z_NO_FLUSH);
-
-            switch (ret) {
-                case Z_STREAM_ERROR:
-                case Z_NEED_DICT:
-                case Z_DATA_ERROR:
-                case Z_MEM_ERROR:
-                    (void)inflateEnd(&strm);
-                    qWarning() << "Zlib inflation failed with critical error code:" << ret;
-                    return nullptr;
-            }
-
-            unsigned int have = CHUNK - strm.avail_out;
-            if (outFile->write(reinterpret_cast<const char*>(out), have) != have) {
-                (void)inflateEnd(&strm);
-                qWarning() << "Error writing to temporary file:" << outFile->errorString();
-                return nullptr;
-            }
-        } while (strm.avail_out == 0);
-
-    } while (ret != Z_STREAM_END);
-
-    (void)inflateEnd(&strm);
-    outFile->close();
-    return outFile;
-}
-
-
 // =============================================================================
 // CLASS IMPLEMENTATION: QCToolsManager
 // =============================================================================
@@ -159,18 +87,20 @@ QString QCToolsManager::getReportPath(ReportType type) const
         reportDir = m_reportDir;
     } else if (!m_sourceReportPath.isEmpty()) {
         QFileInfo fileInfo(m_sourceReportPath);
-        baseNameWithExt = fileInfo.fileName(); // Lấy tên file đầy đủ
-        // SỬA LỖI: Xử lý tên file báo cáo đầu vào để tránh lặp đuôi file
-        if (baseNameWithExt.endsWith(".qctools.mkv")) {
-             baseNameWithExt.chop(12);
-        } else if (baseNameWithExt.endsWith(".qctools.xml.gz")) {
-             baseNameWithExt.chop(16);
-        } else if (baseNameWithExt.endsWith(".qctools.xml")) {
-             baseNameWithExt.chop(12);
-        } else if (baseNameWithExt.endsWith(".xml.gz")) {
-             baseNameWithExt.chop(7);
-        } else if (baseNameWithExt.endsWith(".xml")) {
-             baseNameWithExt.chop(4);
+        QString fileName = fileInfo.fileName();
+
+        if (fileName.endsWith(".qctools.xml.gz")) {
+             baseNameWithExt = fileName.left(fileName.length() - 16);
+        } else if (fileName.endsWith(".qctools.mkv")) {
+             baseNameWithExt = fileName.left(fileName.length() - 12);
+        } else if (fileName.endsWith(".qctools.xml")) {
+             baseNameWithExt = fileName.left(fileName.length() - 12);
+        } else if (fileName.endsWith(".xml.gz")) {
+             baseNameWithExt = fileName.left(fileName.length() - 7);
+        } else if (fileName.endsWith(".xml")) {
+             baseNameWithExt = fileName.left(fileName.length() - 4);
+        } else {
+            baseNameWithExt = fileInfo.completeBaseName();
         }
         reportDir = fileInfo.absolutePath();
     } else { return QString(); }
@@ -186,6 +116,7 @@ QString QCToolsManager::getReportPath(ReportType type) const
     }
     return QString();
 }
+
 
 void QCToolsManager::cleanup() {
     if (m_mainProcess) { m_mainProcess->kill(); m_mainProcess->deleteLater(); m_mainProcess = nullptr; }
@@ -275,42 +206,33 @@ void QCToolsManager::processReportFile(const QString &reportPath, const QVariant
     QFileInfo fileInfo(reportPath);
     QString fileName = fileInfo.fileName().toLower();
 
-    try {
-        if (fileName.endsWith(".xml") || fileName.endsWith(".qctools.xml")) {
-            parseReport(reportPath);
-        } else if (fileName.endsWith(".xml.gz") || fileName.endsWith(".qctools.xml.gz")) {
-            m_currentStep = 1;
-            m_currentPhase = "Giải nén báo cáo";
-            emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
-            emit progressUpdated(50, 100);
-            emit logMessage(QString("[%1] Bắt đầu Bước 1/%2: %3 file nén...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_totalSteps).arg(m_currentPhase));
+    if (m_stopRequested) { emit analysisFinished(false); return; }
 
-            auto tempFilePtr = decompressGzFile(reportPath);
-            emit progressUpdated(100, 100);
-
-            if (tempFilePtr && !tempFilePtr->fileName().isEmpty()) {
-                emit logMessage(QString("[%1] Giải nén thành công.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
-                parseReport(tempFilePtr->fileName());
+    if (fileName.endsWith(".xml") || fileName.endsWith(".qctools.xml")) {
+        QFile reportFile(reportPath);
+        if (reportFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            if (parseReport(&reportFile)) {
+                emit analysisFinished(true);
             } else {
-                emit errorOccurred("Giải nén file .gz thất bại.");
-                throw std::runtime_error("Gzip decompression failed.");
+                emit analysisFinished(false);
             }
-        } else if (fileName.endsWith(".mkv") || fileName.endsWith(".qctools.mkv")) {
-            m_tempDir = std::make_unique<QTemporaryDir>();
-            if (m_tempDir && m_tempDir->isValid()) {
-                extractFromMkv(reportPath);
-                return;
-            } else {
-                emit errorOccurred("Không thể tạo thư mục tạm để trích xuất.");
-                 throw std::runtime_error("Failed to create temp dir.");
-            }
+        } else {
+             emit errorOccurred("Không thể mở file báo cáo XML.");
+             emit analysisFinished(false);
         }
-        emit analysisFinished(true);
-    } catch (const std::exception& e) {
-        qWarning() << "Caught exception during report processing:" << e.what();
-        emit analysisFinished(false);
+    } else if (fileName.endsWith(".xml.gz") || fileName.endsWith(".qctools.xml.gz")) {
+        decompressGzFile(reportPath);
+    } else if (fileName.endsWith(".mkv") || fileName.endsWith(".qctools.mkv")) {
+        m_tempDir = std::make_unique<QTemporaryDir>();
+        if (m_tempDir && m_tempDir->isValid()) {
+            extractFromMkv(reportPath);
+        } else {
+            emit errorOccurred("Không thể tạo thư mục tạm để trích xuất.");
+            emit analysisFinished(false);
+        }
     }
 }
+
 
 void QCToolsManager::onAnalysisStage1Finished(int exitCode, QProcess::ExitStatus exitStatus) {
     readAnalysisOutput();
@@ -326,16 +248,25 @@ void QCToolsManager::onAnalysisStage1Finished(int exitCode, QProcess::ExitStatus
 
     emit logMessage(QString("[%1] Hoàn tất Bước 1 & 2 (Phân tích và Tạo XML).").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
 
-    try {
-        parseReport(getReportPath(ReportType::XML));
+    QFile reportFile(getReportPath(ReportType::XML));
+    if (!reportFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit errorOccurred("Không thể mở file báo cáo XML vừa tạo.");
+        emit analysisFinished(false);
+        return;
+    }
 
+    if (parseReport(&reportFile)) {
         if (!m_filePath.isEmpty()) {
             startMkvGeneration();
         } else {
             emit analysisFinished(true);
         }
-    } catch (const std::exception& e) {
-        qWarning() << "Caught exception after stage 1:" << e.what();
+    } else {
+        // Nếu parseReport trả về false, nó có thể là do người dùng đã dừng,
+        // không cần phát tín hiệu lỗi nữa.
+        if (!m_stopRequested) {
+            emit errorOccurred("Phân tích file XML thất bại.");
+        }
         emit analysisFinished(false);
     }
 }
@@ -366,11 +297,16 @@ void QCToolsManager::onExtractionFinished(int exitCode, QProcess::ExitStatus exi
     }
     emit logMessage(QString("[%1] Trích xuất thành công.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
 
-    try {
-        parseReport(getReportPath(ReportType::XML));
+    QFile reportFile(getReportPath(ReportType::XML));
+    if (!reportFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit errorOccurred("Không thể mở file báo cáo XML vừa trích xuất.");
+        emit analysisFinished(false);
+        return;
+    }
+
+    if (parseReport(&reportFile)) {
         emit analysisFinished(true);
-    } catch (const std::exception& e) {
-        qWarning() << "Caught exception after extraction:" << e.what();
+    } else {
         emit analysisFinished(false);
     }
 }
@@ -383,7 +319,7 @@ void QCToolsManager::startMkvGeneration() {
     m_currentStep = 6;
     m_currentPhase = "Tạo .qctools.mkv";
     emit logMessage(QString("[%1] Bắt đầu Bước %2/%3: %4...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
-    emit statusUpdated(QString("Bước %1/%2 - %3 (chạy nền)...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
+    emit statusUpdated(QString("Bước %1/%2 - %3 ...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
     m_backgroundProcess = new QProcess(this);
     connect(m_backgroundProcess, &QProcess::finished, this, &QCToolsManager::onMkvGenerationFinished);
     QStringList args; args << "-i" << m_filePath << "-o" << getReportPath(ReportType::MKV) << "-y";
@@ -455,8 +391,7 @@ void QCToolsManager::readAnalysisOutput() {
                 m_totalFramesFromLog = totalFrames;
             }
             if (totalFrames > 0) {
-                int percentage = static_cast<int>((static_cast<double>(currentFrame) / totalFrames) * 100.0);
-                emit statusUpdated(QString("Bước %1/%2 - %3: %4%").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase).arg(percentage));
+                emit statusUpdated(QString("Bước %1/%2 - %3").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
                 emit progressUpdated(currentFrame, totalFrames);
             }
         }
@@ -464,75 +399,181 @@ void QCToolsManager::readAnalysisOutput() {
 }
 
 // =============================================================================
+// DECOMPRESSION LOGIC (CẢI TIẾN)
+// =============================================================================
+
+#define CHUNK_SIZE 16384 // Sử dụng buffer 16KB
+
+void QCToolsManager::decompressGzFile(const QString &gzPath) {
+    m_currentStep = 1;
+    m_currentPhase = "Giải nén báo cáo";
+    emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
+    emit progressUpdated(0, 100);
+    emit logMessage(QString("[%1] Bắt đầu Bước 1/%2: %3 file nén...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_totalSteps).arg(m_currentPhase));
+
+    QFile gzFile(gzPath);
+    if (!gzFile.open(QIODevice::ReadOnly)) {
+        emit errorOccurred("Không thể mở file nén .gz để đọc.");
+        emit analysisFinished(false);
+        return;
+    }
+
+    auto tempOutFile = std::make_unique<QTemporaryFile>();
+    if (!tempOutFile->open()) {
+        emit errorOccurred("Không thể tạo file tạm để ghi dữ liệu giải nén.");
+        emit analysisFinished(false);
+        return;
+    }
+
+    z_stream zStream;
+    zStream.zalloc = Z_NULL;
+    zStream.zfree = Z_NULL;
+    zStream.opaque = Z_NULL;
+    zStream.avail_in = 0;
+    zStream.next_in = Z_NULL;
+    if (inflateInit2(&zStream, 16 + MAX_WBITS) != Z_OK) {
+        emit errorOccurred("Khởi tạo zlib thất bại.");
+        emit analysisFinished(false);
+        return;
+    }
+
+    Bytef in[CHUNK_SIZE];
+    Bytef out[CHUNK_SIZE];
+    int ret;
+    qint64 bytesRead = 0;
+    qint64 totalSize = gzFile.size();
+
+    do {
+        if (m_stopRequested) {
+            (void)inflateEnd(&zStream);
+            emit analysisFinished(false);
+            return;
+        }
+
+        zStream.avail_in = gzFile.read(reinterpret_cast<char*>(in), CHUNK_SIZE);
+        bytesRead += zStream.avail_in;
+        if (gzFile.error() != QFile::NoError) {
+            emit errorOccurred("Lỗi khi đọc từ file .gz: " + gzFile.errorString());
+            (void)inflateEnd(&zStream);
+            emit analysisFinished(false);
+            return;
+        }
+
+        if (zStream.avail_in == 0) break;
+        zStream.next_in = in;
+        
+        do {
+            zStream.avail_out = CHUNK_SIZE;
+            zStream.next_out = out;
+            ret = inflate(&zStream, Z_NO_FLUSH);
+
+            switch (ret) {
+                case Z_STREAM_ERROR: case Z_NEED_DICT: case Z_DATA_ERROR: case Z_MEM_ERROR:
+                    emit errorOccurred(QString("Lỗi giải nén zlib nghiêm trọng: mã lỗi %1").arg(ret));
+                    (void)inflateEnd(&zStream);
+                    emit analysisFinished(false);
+                    return;
+            }
+
+            unsigned int have = CHUNK_SIZE - zStream.avail_out;
+            if (tempOutFile->write(reinterpret_cast<const char*>(out), have) != have) {
+                emit errorOccurred("Lỗi khi ghi vào file tạm: " + tempOutFile->errorString());
+                (void)inflateEnd(&zStream);
+                emit analysisFinished(false);
+                return;
+            }
+        } while (zStream.avail_out == 0);
+
+        if (totalSize > 0) {
+            emit progressUpdated(bytesRead, totalSize);
+        }
+
+    } while (ret != Z_STREAM_END);
+
+    (void)inflateEnd(&zStream);
+    gzFile.close();
+    
+    if (m_stopRequested) {
+        emit analysisFinished(false);
+        return;
+    }
+
+    emit progressUpdated(100, 100);
+    emit logMessage(QString("[%1] Giải nén thành công.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
+
+    // CẢI TIẾN: Mở lại file tạm để đọc và phân tích
+    tempOutFile->seek(0);
+    if (parseReport(tempOutFile.get())) {
+         emit analysisFinished(true);
+    } else {
+         emit analysisFinished(false);
+    }
+}
+
+
+// =============================================================================
 // REPORT PARSING LOGIC
 // =============================================================================
 
-void QCToolsManager::parseReport(const QString &reportPath) {
+bool QCToolsManager::parseReport(QIODevice* device) {
+    if (!device) {
+        emit errorOccurred("Thiết bị đọc file báo cáo không hợp lệ.");
+        return false;
+    }
     m_currentStep++;
     m_currentPhase = "Đọc & Phân tích Báo cáo";
     emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
-    emit progressUpdated(1, 100);
+    emit progressUpdated(0, 100);
     emit logMessage(QString("[%1] Bắt đầu Bước %2/%3: %4...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
-    emit logMessage(QString("   - File: %1").arg(QDir::toNativeSeparators(reportPath)));
 
-    QFile reportFile(reportPath);
-    if (!reportFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        emit errorOccurred("Không thể mở file báo cáo XML.");
-        throw std::runtime_error("Cannot open XML report file.");
-    }
+    QXmlStreamReader xml(device);
+    
+    // CẢI TIẾN: Luôn kiểm tra yêu cầu dừng
+    if (m_stopRequested) { return false; }
+    
+    MediaInfo mediaInfo = parseMediaInfo(xml);
+    device->seek(0);
+    xml.setDevice(device);
 
-    QXmlStreamReader xml(&reportFile);
-
-    MediaInfo mediaInfo = parseMediaInfo(xml); // CẢI TIẾN: Lấy thông tin media
-    xml.setDevice(nullptr); // Tách device ra trước khi seek
-    reportFile.seek(0);
-    xml.setDevice(&reportFile);
+    if (m_stopRequested) { return false; }
 
     QList<FrameData> allFramesData = extractAllFrameData(xml);
+    
+    if (m_stopRequested) { return false; }
 
     if (xml.hasError()) {
         QString errorMsg = QString("Lỗi phân tích cú pháp XML: %1 (Dòng %2, Cột %3)").arg(xml.errorString()).arg(xml.lineNumber()).arg(xml.columnNumber());
         emit errorOccurred(errorMsg);
-        reportFile.close();
-        throw std::runtime_error(errorMsg.toStdString());
+        return false;
     }
-    reportFile.close();
+    
     emit progressUpdated(100, 100);
+    emit mediaInfoReady(mediaInfo);
 
-    emit mediaInfoReady(mediaInfo); // CẢI TIẾN: Gửi thông tin media
-
-    // CẢI TIẾN: Đồng bộ hóa thông tin từ mediaInfo
     m_fps = mediaInfo.fps;
     m_videoWidth = mediaInfo.width;
     m_videoHeight = mediaInfo.height;
-
     if (m_totalFramesFromLog > 0) m_totalFrames = m_totalFramesFromLog;
 
-    // CẢI TIẾN: Yêu cầu FPS chính xác
     if (m_fps <= 0) {
-        QString errorMsg = QString("Lỗi nghiêm trọng: Không thể xác định FPS của video từ báo cáo. Dữ liệu timecode sẽ không chính xác.");
-        emit errorOccurred(errorMsg);
-        throw std::runtime_error(errorMsg.toStdString());
+        emit errorOccurred("Lỗi nghiêm trọng: Không thể xác định FPS của video từ báo cáo. Dữ liệu timecode sẽ không chính xác.");
+        return false;
     }
-
     if (m_videoWidth <= 0 || m_videoHeight <= 0) {
-        QString errorMsg = QString("Lỗi: Đã đọc xong file XML nhưng không tìm thấy thông tin video stream hợp lệ (width/height=%1x%2).").arg(m_videoWidth).arg(m_videoHeight);
-        emit errorOccurred(errorMsg);
-        throw std::runtime_error(errorMsg.toStdString());
+        emit errorOccurred(QString("Lỗi: Đã đọc xong file XML nhưng không tìm thấy thông tin video stream hợp lệ (width/height=%1x%2).").arg(m_videoWidth).arg(m_videoHeight));
+        return false;
     }
-    if (allFramesData.isEmpty()) {
-        QString errorMsg = QString("Lỗi: Đã đọc xong file XML nhưng không tìm thấy dữ liệu của bất kỳ frame nào.");
-        emit errorOccurred(errorMsg);
-        throw std::runtime_error(errorMsg.toStdString());
+    if (allFramesData.isEmpty() && !m_stopRequested) {
+        emit errorOccurred("Lỗi: Đã đọc xong file XML nhưng không tìm thấy dữ liệu của bất kỳ frame nào.");
+        return false;
     }
+    if (m_stopRequested) { return false; }
 
     emit logMessage(QString("[%1]     -> Đã đọc xong. Tìm thấy %2 frame. Bắt đầu tổng hợp lỗi...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(allFramesData.count()));
-
-    if (m_totalFrames <= 0) {
-        m_totalFrames = allFramesData.size();
-    }
+    if (m_totalFrames <= 0) m_totalFrames = allFramesData.size();
 
     QList<AnalysisResult> finalResults = runErrorDetection(allFramesData);
+    if (m_stopRequested) { return false; }
 
     if (!finalResults.isEmpty()) {
         emit logMessage(QString("[%1] Tổng hợp xong. Tìm thấy %2 lỗi.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(finalResults.count()));
@@ -541,9 +582,9 @@ void QCToolsManager::parseReport(const QString &reportPath) {
         emit logMessage(QString("[%1] Tổng hợp xong. Không tìm thấy lỗi nào với cấu hình hiện tại.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
         emit resultsReady({});
     }
+    return true;
 }
 
-// CẢI TIẾN: Hàm mới để trích xuất toàn bộ thông tin media
 MediaInfo QCToolsManager::parseMediaInfo(QXmlStreamReader &xml) {
     MediaInfo info;
     bool inFormatSection = false;
@@ -551,6 +592,7 @@ MediaInfo QCToolsManager::parseMediaInfo(QXmlStreamReader &xml) {
     bool foundAudioStream = false;
 
     while (!xml.atEnd()) {
+        if (m_stopRequested) return {};
         xml.readNext();
         if (xml.isStartElement()) {
             if (xml.name() == QLatin1String("format")) {
@@ -587,7 +629,6 @@ MediaInfo QCToolsManager::parseMediaInfo(QXmlStreamReader &xml) {
             if (xml.name() == QLatin1String("format")) {
                 inFormatSection = false;
             }
-            // Stop parsing if we have all we need
             if (foundVideoStream && foundAudioStream) {
                 break;
             }
@@ -600,7 +641,17 @@ MediaInfo QCToolsManager::parseMediaInfo(QXmlStreamReader &xml) {
 QList<FrameData> QCToolsManager::extractAllFrameData(QXmlStreamReader &xml)
 {
     QList<FrameData> allFramesData;
+    qint64 fileSize = xml.device() ? xml.device()->size() : 0;
+    int progressCounter = 0;
+
     while (!xml.atEnd()) {
+        if (m_stopRequested) return {};
+        
+        // CẢI TIẾN: Báo cáo tiến trình đọc file XML
+        if (fileSize > 0 && ++progressCounter % 20 == 0) {
+             emit progressUpdated(xml.device()->pos(), fileSize);
+        }
+
         xml.readNext();
         if (xml.isStartElement() && xml.name() == QLatin1String("frame")) {
             FrameData currentFrame;
@@ -641,10 +692,13 @@ QList<AnalysisResult> QCToolsManager::runErrorDetection(const QList<FrameData> &
     m_currentStep++;
     m_currentPhase = "Gắn thẻ các frame";
     emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
-    emit progressUpdated(50, 100);
+    emit progressUpdated(0, 100);
     emit logMessage(QString("[%1] Bắt đầu Bước %2/%3: %4...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
 
+    if (m_stopRequested) return {};
     QMap<int, QSet<QString>> frameTags = tagFramesForErrors(allFramesData);
+    
+    if (m_stopRequested) return {};
 
     emit progressUpdated(100, 100);
     emit logMessage(QString("[%1]       - Hoàn tất.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
@@ -652,10 +706,13 @@ QList<AnalysisResult> QCToolsManager::runErrorDetection(const QList<FrameData> &
     m_currentStep++;
     m_currentPhase = "Gom nhóm lỗi";
     emit statusUpdated(QString("Bước %1/%2 - %3...").arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
-    emit progressUpdated(50, 100);
+    emit progressUpdated(0, 100);
     emit logMessage(QString("[%1] Bắt đầu Bước %2/%3: %3...").arg(QTime::currentTime().toString("hh:mm:ss.zzz")).arg(m_currentStep).arg(m_totalSteps).arg(m_currentPhase));
 
+    if (m_stopRequested) return {};
     QList<AnalysisResult> finalResults = groupErrorsFromTags(frameTags, allFramesData);
+
+    if (m_stopRequested) return {};
 
     emit progressUpdated(100, 100);
     emit logMessage(QString("[%1]       - Hoàn tất.").arg(QTime::currentTime().toString("hh:mm:ss.zzz")));
@@ -670,14 +727,16 @@ QMap<int, QSet<QString>> QCToolsManager::tagFramesForErrors(const QList<FrameDat
     const double borderThreshPercent = m_settings.value(AppConstants::K_BORDER_THRESH, 0.2).toDouble();
     const double sceneThresh = m_settings.value(AppConstants::K_SCENE_THRESH, 30.0).toDouble();
     const bool hasTransitions = m_settings.value(AppConstants::K_HAS_TRANSITIONS, false).toBool();
+    const int total = allFramesData.size();
 
-    for(int i = 0; i < allFramesData.size(); ++i) {
+    for(int i = 0; i < total; ++i) {
+        if (m_stopRequested) return {};
+        if (i % 500 == 0) emit progressUpdated(i, total);
+
         const auto& frame = allFramesData[i];
-
         if (m_settings.value(AppConstants::K_DETECT_BLACK_FRAMES, true).toBool() && frame.yavg < blackFrameThresh) {
             frameTags[frame.frameNum].insert(AppConstants::TAG_IS_BLACK);
         }
-
         if (m_settings.value(AppConstants::K_DETECT_BLACK_BORDERS, true).toBool()) {
             bool isAlreadyBlack = frameTags.contains(frame.frameNum) && frameTags[frame.frameNum].contains(AppConstants::TAG_IS_BLACK);
             if (!isAlreadyBlack) {
@@ -687,7 +746,6 @@ QMap<int, QSet<QString>> QCToolsManager::tagFramesForErrors(const QList<FrameDat
                 }
             }
         }
-
         if (m_settings.value(AppConstants::K_DETECT_ORPHAN_FRAMES, true).toBool() && i > 0) {
             if (hasTransitions) {
                 if (i < allFramesData.size() - 1) {
@@ -716,12 +774,15 @@ QList<AnalysisResult> QCToolsManager::groupErrorsFromTags(const QMap<int, QSet<Q
 {
     QList<AnalysisResult> finalResults;
     if (m_settings.value(AppConstants::K_DETECT_BLACK_FRAMES, true).toBool()) {
+        if (m_stopRequested) return {};
         groupBlackFrames(finalResults, frameTags, allFramesData);
     }
     if (m_settings.value(AppConstants::K_DETECT_BLACK_BORDERS, true).toBool()) {
+        if (m_stopRequested) return {};
         groupBorderedFrames(finalResults, frameTags, allFramesData);
     }
     if (m_settings.value(AppConstants::K_DETECT_ORPHAN_FRAMES, true).toBool()) {
+        if (m_stopRequested) return {};
         findOrphanFrames(finalResults, frameTags, allFramesData);
     }
     return finalResults;
@@ -731,6 +792,7 @@ void QCToolsManager::groupBlackFrames(QList<AnalysisResult> &results, const QMap
 {
     QList<FrameData> currentGroup;
     for(const auto& frame : frames) {
+        if(m_stopRequested) return;
         bool isBlack = tags.contains(frame.frameNum) && tags[frame.frameNum].contains(AppConstants::TAG_IS_BLACK);
         if (isBlack) {
             currentGroup.append(frame);
@@ -738,7 +800,13 @@ void QCToolsManager::groupBlackFrames(QList<AnalysisResult> &results, const QMap
             if (!currentGroup.isEmpty()) {
                 double yavgSum = 0;
                 for(const auto& f : currentGroup) yavgSum += f.yavg;
-                results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroup.first().frameNum, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, QString("Frame tối (YAVG TB: %1)").arg(yavgSum / currentGroup.count(), 0, 'f', 2), currentGroup.first().frameNum });
+                const int startFrame = currentGroup.first().frameNum;
+                const int endFrame = currentGroup.last().frameNum;
+                QString details = QString("Frame tối (YAVG TB: %1), từ frame %2 đến %3")
+                                      .arg(yavgSum / currentGroup.count(), 0, 'f', 2)
+                                      .arg(startFrame)
+                                      .arg(endFrame);
+                results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(startFrame, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, details, startFrame });
                 currentGroup.clear();
             }
         }
@@ -746,7 +814,13 @@ void QCToolsManager::groupBlackFrames(QList<AnalysisResult> &results, const QMap
     if (!currentGroup.isEmpty()) {
          double yavgSum = 0;
          for(const auto& f : currentGroup) yavgSum += f.yavg;
-         results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroup.first().frameNum, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, QString("Frame tối (YAVG TB: %1)").arg(yavgSum / currentGroup.count(), 0, 'f', 2), currentGroup.first().frameNum });
+         const int startFrame = currentGroup.first().frameNum;
+         const int endFrame = currentGroup.last().frameNum;
+         QString details = QString("Frame tối (YAVG TB: %1), từ frame %2 đến %3")
+                               .arg(yavgSum / currentGroup.count(), 0, 'f', 2)
+                               .arg(startFrame)
+                               .arg(endFrame);
+         results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(startFrame, m_fps), QString::number(currentGroup.count()), AppConstants::ERR_BLACK_FRAME, details, startFrame });
     }
 }
 
@@ -754,6 +828,7 @@ void QCToolsManager::groupBorderedFrames(QList<AnalysisResult> &results, const Q
 {
     std::optional<BorderGroup> currentGroupOpt;
     for(const auto& frame : frames) {
+        if(m_stopRequested) return;
         bool isBordered = tags.contains(frame.frameNum) && tags[frame.frameNum].contains(AppConstants::TAG_HAS_BORDER);
          if (isBordered) {
             CropValues cv = CropValues::fromFrameData(frame, m_videoWidth, m_videoHeight);
@@ -770,52 +845,69 @@ void QCToolsManager::groupBorderedFrames(QList<AnalysisResult> &results, const Q
             }
         } else {
             if (currentGroupOpt.has_value()) {
-                results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight), currentGroupOpt->startFrame });
+                QString details = formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight) +
+                                  QString(", từ frame %1 đến %2").arg(currentGroupOpt->startFrame).arg(currentGroupOpt->endFrame);
+                results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, details, currentGroupOpt->startFrame });
                 currentGroupOpt.reset();
             }
         }
     }
     if (currentGroupOpt.has_value()) {
-        results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight), currentGroupOpt->startFrame });
+        QString details = formatCropDetails(currentGroupOpt->minCv, currentGroupOpt->maxCv, m_videoWidth, m_videoHeight) +
+                          QString(", từ frame %1 đến %2").arg(currentGroupOpt->startFrame).arg(currentGroupOpt->endFrame);
+        results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(currentGroupOpt->startFrame, m_fps), QString::number(currentGroupOpt->count), AppConstants::ERR_BLACK_BORDER, details, currentGroupOpt->startFrame });
     }
 }
 
 void QCToolsManager::findOrphanFrames(QList<AnalysisResult> &results, const QMap<int, QSet<QString>> &tags, const QList<FrameData> &frames)
 {
-    int orphanThresh = m_settings.value(AppConstants::K_ORPHAN_THRESH, 5).toInt();
+    const int orphanThresh = m_settings.value(AppConstants::K_ORPHAN_THRESH, 5).toInt();
+    if (orphanThresh <= 0) return;
 
     QList<int> scene_cuts;
     scene_cuts.append(0);
     for(const auto& frame : frames) {
-        if(tags.contains(frame.frameNum) && tags[frame.frameNum].contains(AppConstants::TAG_IS_SCENE_CUT)) {
+        if(tags.value(frame.frameNum).contains(AppConstants::TAG_IS_SCENE_CUT)) {
             scene_cuts.append(frame.frameNum);
         }
     }
-    if (m_totalFrames > 0 && !scene_cuts.contains(m_totalFrames)) {
+    if (m_totalFrames > 0 && (scene_cuts.isEmpty() || scene_cuts.last() != m_totalFrames)) {
         scene_cuts.append(m_totalFrames);
     }
+    
+    std::sort(scene_cuts.begin(), scene_cuts.end());
+    auto last = std::unique(scene_cuts.begin(), scene_cuts.end());
+    scene_cuts.erase(last, scene_cuts.end());
 
     for (int i = 0; i < scene_cuts.size() - 1; ++i) {
-        int startFrame = scene_cuts[i];
-        if (startFrame == 0) continue;
+        if(m_stopRequested) return;
+        const int startFrame = scene_cuts[i];
+        
+        if (startFrame == 0) {
+            continue;
+        }
 
-        int endFrame = scene_cuts[i+1];
-        int duration = endFrame - startFrame;
+        const int endFrame = scene_cuts[i+1];
+        const int duration = endFrame - startFrame;
+
+        if (duration <= 0 || duration > orphanThresh) {
+            continue;
+        }
 
         bool sceneContainsNonBlackFrames = false;
         for(int j = startFrame; j < endFrame; ++j) {
-            // Cần truy cập `frames` để kiểm tra, nhưng `frames` không được sắp xếp theo frameNum
-            // Đây là một logic phức tạp, tạm thời giữ nguyên
-            if (!tags.contains(j) || !tags[j].contains(AppConstants::TAG_IS_BLACK)) {
+            if (!tags.value(j).contains(AppConstants::TAG_IS_BLACK)) {
                 sceneContainsNonBlackFrames = true;
                 break;
             }
         }
-        if (duration > 0 && duration <= orphanThresh && sceneContainsNonBlackFrames) {
+
+        if (sceneContainsNonBlackFrames) {
             results.append({ QCToolsManager::frameToTimecodeHHMMSSFF(startFrame, m_fps), QString::number(duration), AppConstants::ERR_ORPHAN_FRAME, QString("Cảnh ngắn bất thường, từ frame %1 đến %2").arg(startFrame).arg(endFrame - 1), startFrame });
         }
     }
 }
+
 
 QString QCToolsManager::createReportDirectory() {
     if (m_filePath.isEmpty()) return QString();

@@ -18,7 +18,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 
-const QString APP_VERSION = "2.1";
+const QString APP_VERSION = "2.2";
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
@@ -89,6 +89,8 @@ void SettingsDialog::setupUI()
     m_rewindFramesSpinBox = new QSpinBox(this);
     m_rewindFramesSpinBox->setRange(0, 100);
     m_rewindFramesSpinBox->setToolTip("Khi double-click vào một lỗi, timecode được sao chép sẽ bị trừ đi số frame này.");
+    // CẢI TIẾN: Giảm chiều rộng của SpinBox cho đồng nhất
+    m_rewindFramesSpinBox->setFixedWidth(80);
     interactionLayout->addRow("Lùi lại khi double-click (frames):", m_rewindFramesSpinBox);
 
     // --- Hardware Tab ---
@@ -213,4 +215,3 @@ void SettingsDialog::onResetToDefaultsClicked()
         emit settingsReset();
     }
 }
-

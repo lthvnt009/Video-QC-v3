@@ -15,6 +15,9 @@
 #include <QFileDialog>
 #include <QSettings>
 #include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMessageBox>
 
 ConfigWidget::ConfigWidget(QWidget *parent)
     : QWidget(parent)
@@ -28,7 +31,6 @@ void ConfigWidget::setInputPath(const QString &path)
     m_videoPathEdit->setText(QDir::toNativeSeparators(path));
 }
 
-// CẢI TIẾN: Slot mới để tải lại cài đặt khi cần
 void ConfigWidget::reloadSettings()
 {
     loadSettings();
@@ -45,17 +47,35 @@ void ConfigWidget::setupUI()
     m_videoPathEdit = new QLineEdit;
     m_videoPathEdit->setPlaceholderText("Chưa chọn file (hỗ trợ kéo-thả vào cửa sổ)");
     m_videoPathEdit->setReadOnly(true);
-    QPushButton *selectFileButton = new QPushButton("Chọn Video...");
-    QPushButton *selectReportButton = new QPushButton("Nhập Báo Cáo...");
+    QPushButton *selectFileButton = new QPushButton("Chọn Video");
+    QPushButton *selectReportButton = new QPushButton("Nhập Báo Cáo");
     connect(selectFileButton, &QPushButton::clicked, this, &ConfigWidget::onSelectFileClicked);
     connect(selectReportButton, &QPushButton::clicked, this, &ConfigWidget::onSelectReportClicked);
     fileLayout->addWidget(m_videoPathEdit, 1);
     fileLayout->addWidget(selectFileButton);
     fileLayout->addWidget(selectReportButton);
 
-    // --- Configuration Group ---
-    QGroupBox *configBox = new QGroupBox("Cấu hình Phát hiện Lỗi");
+    // --- Configuration Section ---
+
+    // CẢI TIẾN: Tạo một layout riêng cho tiêu đề và các nút preset
+    QHBoxLayout *configHeaderLayout = new QHBoxLayout();
+    QLabel *configTitleLabel = new QLabel("<b>Cấu hình Phát hiện Lỗi</b>");
+    m_loadPresetButton = new QPushButton("Tải Cấu hình");
+    m_savePresetButton = new QPushButton("Lưu Cấu hình");
+    connect(m_loadPresetButton, &QPushButton::clicked, this, &ConfigWidget::onLoadPresetClicked);
+    connect(m_savePresetButton, &QPushButton::clicked, this, &ConfigWidget::onSavePresetClicked);
+
+    configHeaderLayout->addWidget(configTitleLabel);
+    configHeaderLayout->addStretch();
+    configHeaderLayout->addWidget(m_loadPresetButton);
+    configHeaderLayout->addWidget(m_savePresetButton);
+
+
+    // CẢI TIẾN: GroupBox bây giờ không có tiêu đề, chỉ dùng để tạo khung
+    QGroupBox *configBox = new QGroupBox();
     QVBoxLayout *configVLayout = new QVBoxLayout(configBox);
+    configVLayout->setContentsMargins(configVLayout->contentsMargins().left(), 12, configVLayout->contentsMargins().right(), configVLayout->contentsMargins().bottom());
+
 
     // --- Top Row Layout (Black Frames & Black Borders) ---
     QHBoxLayout *topLayout = new QHBoxLayout();
@@ -68,6 +88,7 @@ void ConfigWidget::setupUI()
     m_blackFrameThreshSpinBox->setRange(0.0, 255.0);
     m_blackFrameThreshSpinBox->setDecimals(1);
     m_blackFrameThreshSpinBox->setSingleStep(0.5);
+    m_blackFrameThreshSpinBox->setFixedWidth(80);
     QLabel* blackFrameLabel = new QLabel("Ngưỡng (YAVG) <");
     blackFrameLabel->setToolTip(
         "Một frame có độ sáng trung bình (YAVG) thấp hơn giá trị này sẽ bị coi là 'Frame Đen'.\n\n"
@@ -92,6 +113,7 @@ void ConfigWidget::setupUI()
     m_borderThreshSpinBox->setDecimals(2);
     m_borderThreshSpinBox->setSuffix(" %");
     m_borderThreshSpinBox->setSingleStep(0.1);
+    m_borderThreshSpinBox->setFixedWidth(80);
     QLabel* borderLabel = new QLabel("Ngưỡng >= ");
     borderLabel->setToolTip(
         "Một frame sẽ bị coi là có lỗi nếu có ít nhất một cạnh (trên, dưới, trái, phải) có viền đen lớn hơn tỉ lệ % này so với chiều cao/rộng của video.\n\n"
@@ -170,17 +192,34 @@ void ConfigWidget::setupUI()
     connect(m_hasTransitionsCheck, &QCheckBox::toggled, m_sceneDetectThreshSpinBox, &QDoubleSpinBox::setDisabled);
 
 
-    // --- Assemble Config Box ---
+    // --- Assemble Config Box Content ---
     configVLayout->addLayout(topLayout);
     configVLayout->addWidget(m_orphanFrameBox);
 
+    // --- Assemble Main Layout ---
     mainLayout->addWidget(fileBox);
-    mainLayout->addWidget(configBox);
+    mainLayout->addLayout(configHeaderLayout); // Thêm layout tiêu đề
+    mainLayout->addWidget(configBox);          // Thêm group box chứa nội dung
 }
 
 void ConfigWidget::loadSettings()
 {
     QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
+    QVariantMap settingsMap;
+    settingsMap[AppConstants::K_DETECT_BLACK_FRAMES] = settings.value(AppConstants::K_DETECT_BLACK_FRAMES, true);
+    settingsMap[AppConstants::K_DETECT_BLACK_BORDERS] = settings.value(AppConstants::K_DETECT_BLACK_BORDERS, true);
+    settingsMap[AppConstants::K_DETECT_ORPHAN_FRAMES] = settings.value(AppConstants::K_DETECT_ORPHAN_FRAMES, true);
+    settingsMap[AppConstants::K_BORDER_THRESH] = settings.value(AppConstants::K_BORDER_THRESH, 0.2);
+    settingsMap[AppConstants::K_ORPHAN_THRESH] = settings.value(AppConstants::K_ORPHAN_THRESH, 5);
+    settingsMap[AppConstants::K_BLACK_FRAME_THRESH] = settings.value(AppConstants::K_BLACK_FRAME_THRESH, 17.0);
+    settingsMap[AppConstants::K_SCENE_THRESH] = settings.value(AppConstants::K_SCENE_THRESH, 30.0);
+    settingsMap[AppConstants::K_HAS_TRANSITIONS] = settings.value(AppConstants::K_HAS_TRANSITIONS, false);
+    
+    setSettings(settingsMap);
+}
+
+void ConfigWidget::setSettings(const QVariantMap &settings)
+{
     m_blackFrameBox->setChecked(settings.value(AppConstants::K_DETECT_BLACK_FRAMES, true).toBool());
     m_blackBorderBox->setChecked(settings.value(AppConstants::K_DETECT_BLACK_BORDERS, true).toBool());
     m_orphanFrameBox->setChecked(settings.value(AppConstants::K_DETECT_ORPHAN_FRAMES, true).toBool());
@@ -191,7 +230,6 @@ void ConfigWidget::loadSettings()
     m_sceneDetectThreshSpinBox->setValue(settings.value(AppConstants::K_SCENE_THRESH, 30.0).toDouble());
     m_hasTransitionsCheck->setChecked(settings.value(AppConstants::K_HAS_TRANSITIONS, false).toBool());
 
-    // Initial state based on checkbox
     bool transitionsEnabled = m_hasTransitionsCheck->isChecked();
     m_sceneDetectThreshSpinBox->setDisabled(transitionsEnabled);
 }
@@ -199,22 +237,14 @@ void ConfigWidget::loadSettings()
 void ConfigWidget::saveSettings()
 {
     QSettings settings(AppConstants::ORG_NAME, AppConstants::APP_NAME);
-    settings.setValue(AppConstants::K_DETECT_BLACK_FRAMES, m_blackFrameBox->isChecked());
-    settings.setValue(AppConstants::K_DETECT_BLACK_BORDERS, m_blackBorderBox->isChecked());
-    settings.setValue(AppConstants::K_DETECT_ORPHAN_FRAMES, m_orphanFrameBox->isChecked());
-    
-    settings.setValue(AppConstants::K_BORDER_THRESH, m_borderThreshSpinBox->value());
-    settings.setValue(AppConstants::K_ORPHAN_THRESH, m_orphanFrameThreshSpinBox->value());
-    settings.setValue(AppConstants::K_BLACK_FRAME_THRESH, m_blackFrameThreshSpinBox->value());
-    settings.setValue(AppConstants::K_SCENE_THRESH, m_sceneDetectThreshSpinBox->value());
-    settings.setValue(AppConstants::K_HAS_TRANSITIONS, m_hasTransitionsCheck->isChecked());
+    QVariantMap currentSettings = getSettings();
+    for(auto it = currentSettings.constBegin(); it != currentSettings.constEnd(); ++it) {
+        settings.setValue(it.key(), it.value());
+    }
 }
-
 
 QVariantMap ConfigWidget::getSettings() const
 {
-    const_cast<ConfigWidget*>(this)->saveSettings();
-
     QVariantMap settings;
     settings[AppConstants::K_DETECT_BLACK_FRAMES] = m_blackFrameBox->isChecked();
     settings[AppConstants::K_DETECT_BLACK_BORDERS] = m_blackBorderBox->isChecked();
@@ -246,3 +276,49 @@ void ConfigWidget::onSelectReportClicked()
         emit reportPathSelected(path);
     }
 }
+
+void ConfigWidget::onSavePresetClicked()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, "Lưu Cấu hình Phân tích", "", "JSON Files (*.json)");
+    if (filePath.isEmpty()) return;
+
+    QFile saveFile(filePath);
+    if (!saveFile.open(QIODevice::WriteOnly)) {
+        QMessageBox::critical(this, "Lỗi", "Không thể ghi file cấu hình.");
+        return;
+    }
+
+    QVariantMap settings = getSettings();
+    QJsonObject jsonObject = QJsonObject::fromVariantMap(settings);
+    QJsonDocument saveDoc(jsonObject);
+
+    saveFile.write(saveDoc.toJson(QJsonDocument::Indented));
+    saveFile.close();
+    QMessageBox::information(this, "Thành công", "Đã lưu file cấu hình thành công.");
+}
+
+void ConfigWidget::onLoadPresetClicked()
+{
+    QString filePath = QFileDialog::getOpenFileName(this, "Tải Cấu hình Phân tích", "", "JSON Files (*.json)");
+    if (filePath.isEmpty()) return;
+
+    QFile loadFile(filePath);
+    if (!loadFile.open(QIODevice::ReadOnly)) {
+        QMessageBox::critical(this, "Lỗi", "Không thể đọc file cấu hình.");
+        return;
+    }
+
+    QByteArray saveData = loadFile.readAll();
+    QJsonDocument loadDoc(QJsonDocument::fromJson(saveData));
+
+    if (loadDoc.isNull() || !loadDoc.isObject()) {
+        QMessageBox::critical(this, "Lỗi", "File cấu hình không hợp lệ hoặc bị lỗi.");
+        return;
+    }
+
+    QVariantMap settings = loadDoc.object().toVariantMap();
+    setSettings(settings); 
+
+    QMessageBox::information(this, "Thành công", "Đã tải và áp dụng cấu hình thành công.");
+}
+

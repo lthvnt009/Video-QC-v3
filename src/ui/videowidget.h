@@ -1,4 +1,4 @@
-// src/ui/videowidget.h
+// src/ui/videowidget.h (Cải tiến Bước 2)
 #ifndef VIDEOWIDGET_H
 #define VIDEOWIDGET_H
 
@@ -7,8 +7,8 @@
 #include <QStringList>
 #include "core/types.h"
 #include "qctools/QCToolsManager.h"
+#include "core/media_info.h"
 
-class QProgressBar;
 class QLabel;
 class QStackedWidget;
 class QPushButton;
@@ -18,7 +18,6 @@ class ResultsWidget;
 class SettingsDialog;
 class QCToolsController;
 class LogDialog;
-struct MediaInfo;
 
 class VideoWidget : public QWidget
 {
@@ -33,6 +32,7 @@ signals:
 
 public slots:
     void handleFileDrop(const QString& path);
+    void onSettingsReset();
 
 private slots:
     void onFileSelected(const QString &path);
@@ -46,8 +46,8 @@ private slots:
     void onControllerError(const QString& message);
     void onResultDoubleClicked(int frameNum);
     void onStatusResetTimeout();
-    void onSettingsReset(); // Slot mới để xử lý việc reset cài đặt
 
+    // Slots for communication with manager thread
     void updateStatus(const QString &status);
     void updateProgress(int value, int max);
     void handleResults(const QList<AnalysisResult> &results);
@@ -63,6 +63,7 @@ private:
 
     void setupUI();
     void setupConnections();
+    void initializePaths(); // CẢI TIẾN: Hàm mới để xử lý logic đường dẫn
     void setAnalysisInProgress(bool inProgress);
     void promptForPaths();
     
@@ -79,7 +80,6 @@ private:
     QStackedWidget *m_analysisButtonStack;
     QPushButton *m_analyzeButton;
     QPushButton *m_stopButton;
-    QProgressBar *m_progressBar;
     QLabel *m_statusLabel;
     QTimer* m_statusResetTimer = nullptr;
     
@@ -96,6 +96,9 @@ private:
     QStringList m_logHistory;
     double m_currentFps = 0.0;
     QString m_persistentStatusText;
+    
+    MediaInfo m_currentMediaInfo;
 };
 
 #endif // VIDEOWIDGET_H
+

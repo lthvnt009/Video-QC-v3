@@ -2,17 +2,17 @@
 setlocal
 
 :: ============================================================================
-:: ==   SCRIPT BIEN DICH PHIEN BAN RELEASE CHO VIDEO QC TOOL CONTROL PANEL   ==
+:: ==       RELEASE BUILD SCRIPT FOR VIDEO QC TOOL CONTROL PANEL           ==
 :: ============================================================================
-:: ==  Script nay se tu dong tim moi truong Visual Studio 2022, xoa build    ==
-:: ==  cu, cau hinh lai CMake, bien dich va dong goi san pham hoan chinh.     ==
+:: == This script automates finding the VS 2022 environment, cleaning,       ==
+:: == configuring, building, and deploying the final application.            ==
 :: ============================================================================
 
-echo [INFO] Bat dau qua trinh bien dich va dong goi...
+echo [INFO] Starting build and deployment process...
 echo.
 
-REM --- Buoc 1: Thiet lap moi truong Visual Studio 2022 ---
-echo [BUOC 1/6] Thiet lap moi truong Visual Studio 2022...
+REM --- Step 1: Setup Visual Studio 2022 Environment ---
+echo [STEP 1/5] Setting up Visual Studio 2022 environment...
 
 set "VS_PATH_COMMUNITY=%ProgramFiles%\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
 set "VS_PATH_PRO=%ProgramFiles%\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat"
@@ -24,88 +24,77 @@ if exist "%VS_PATH_PRO%" set "VS_DEV_CMD=%VS_PATH_PRO%"
 if exist "%VS_PATH_COMMUNITY%" set "VS_DEV_CMD=%VS_PATH_COMMUNITY%"
 
 if not defined VS_DEV_CMD (
-    echo [LOI] Khong tim thay moi truong Visual Studio 2022 Developer Command Prompt.
+    echo [ERROR] Visual Studio 2022 Developer Command Prompt not found.
     goto :error
 )
-echo      -> Da tim thay moi truong tai: "%VS_DEV_CMD%"
+echo      - Found environment at: "%VS_DEV_CMD%"
 call "%VS_DEV_CMD%" -arch=amd64 > nul
-echo      -> Moi truong da san sang.
+echo      - Environment is ready.
 echo.
 
 
-REM --- Cau hinh duong dan ---
-set "PROJECT_NAME=VideoQCTool_v2.0"
+REM --- Path Configuration ---
+set "PROJECT_NAME=VideoQCTool_v2.2"
 set "QT_PATH=C:\Qt\6.9.1\msvc2022_64"
 set "BUILD_DIR=build"
 set "DEPLOY_DIR=Video QC Tool"
 
 
-REM --- Buoc 2: Don dep va kiem tra ---
-echo [BUOC 2/6] Don dep va kiem tra duong dan...
+REM --- Step 2: Cleanup and Checks ---
+echo [STEP 2/5] Cleaning up and checking paths...
 
 if exist "%BUILD_DIR%" (
-    echo      -> Xoa thu muc build cu...
+    echo      - Deleting old build directory...
     rmdir /s /q "%BUILD_DIR%"
 )
 if exist "%DEPLOY_DIR%" (
-    echo      -> Xoa thu muc dong goi cu...
+    echo      - Deleting old deployment directory...
     rmdir /s /q "%DEPLOY_DIR%"
 )
 
 if not exist "%QT_PATH%" (
-    echo [LOI] Khong tim thay thu muc Qt tai: %QT_PATH%
+    echo [ERROR] Qt directory not found at: %QT_PATH%
     goto :error
 )
-echo      -> Kiem tra hoan tat.
+echo      - Checks completed.
 echo.
 
 
-REM --- Buoc 3: Cau hinh CMake ---
-echo [BUOC 3/6] Tao thu muc build va cau hinh CMake...
+REM --- Step 3 & 4: CMake Configuration and Build ---
+echo [STEP 3-4/5] Creating build directory, configuring and building...
 mkdir "%BUILD_DIR%"
 cd "%BUILD_DIR%"
 
+echo      - Running CMake configuration...
 cmake -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="%QT_PATH%" ..
-
 if %errorlevel% neq 0 (
-    echo [LOI] Qua trinh cau hinh CMake that bai.
+    echo [ERROR] CMake configuration failed.
     goto :error
 )
-echo      -> Cau hinh CMake thanh cong.
-echo.
-
-REM --- Buoc 4: Bien dich (Release) ---
-echo [BUOC 4/6] Bien dich du an (che do Release)...
+echo      - Building the project (Release mode)...
 cmake --build . --config Release
-
 if %errorlevel% neq 0 (
-    echo [LOI] Qua trinh bien dich that bai.
+    echo [ERROR] Build process failed.
+    cd ..
     goto :error
 )
-echo      -> Bien dich thanh cong.
-echo.
 cd ..
-
-REM --- Buoc 5: Chuan bi thu muc dong goi ---
-echo [BUOC 5/6] Chuan bi thu muc dong goi...
-mkdir "%DEPLOY_DIR%"
-echo      -> Sao chep file .exe...
-copy "%BUILD_DIR%\Release\%PROJECT_NAME%.exe" "%DEPLOY_DIR%\" > nul
+echo      - Configuration and build successful.
 echo.
 
-REM --- Buoc 6: Dong goi thu vien phu thuoc ---
-echo [BUOC 6/6] Dong goi cac thu vien can thiet...
-echo      -> Dong goi thu vien Qt...
+REM --- Step 5: Application Deployment ---
+echo [STEP 5/5] Preparing directory and deploying libraries...
+mkdir "%DEPLOY_DIR%"
+echo      - Copying executable file...
+copy "%BUILD_DIR%\Release\%PROJECT_NAME%.exe" "%DEPLOY_DIR%\" > nul
+
+echo      - Deploying Qt libraries...
 call "%QT_PATH%\bin\windeployqt.exe" --release --no-translations --no-opengl-sw "%DEPLOY_DIR%\%PROJECT_NAME%.exe"
 if %errorlevel% neq 0 (
-    echo [LOI] windeployqt that bai.
+    echo [ERROR] windeployqt failed.
     goto :error
 )
-if exist "ffmpeg" (
-    echo      -> Dong goi thu vien FFmpeg...
-    xcopy "ffmpeg" "%DEPLOY_DIR%\ffmpeg\" /s /e /i /y > nul
-)
-echo      -> Dong goi hoan tat.
+echo      - Deployment finished.
 echo.
 
 goto :success
@@ -113,17 +102,17 @@ goto :success
 :error
 echo.
 echo ===================================
-echo ==      BUILD THAT BAI           ==
+echo ==         BUILD FAILED          ==
 echo ===================================
-echo Vui long kiem tra cac thong bao loi o tren.
+echo Please check the error messages above.
 goto :end
 
 :success
 echo.
 echo ===================================
-echo ==      HOAN THANH!              ==
+echo ==         SUCCESS!              ==
 echo ===================================
-echo San pham da san sang trong thu muc: "%DEPLOY_DIR%"
+echo The application is ready in the folder: "%DEPLOY_DIR%"
 echo.
 
 :end

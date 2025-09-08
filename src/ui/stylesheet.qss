@@ -1,0 +1,84 @@
+/*
+ * stylesheet.qss (v2.1 - Tăng độ đậm của mũi tên)
+ *
+ * Sử dụng file SVG từ tài nguyên để đảm bảo độ tin cậy.
+ * Tinh chỉnh lại quy tắc viền để hiển thị nhất quán trên mọi layout.
+ */
+
+/* Áp dụng cho cả QSpinBox (số nguyên) và QDoubleSpinBox (số thực) */
+QSpinBox,
+QDoubleSpinBox {
+    border: 1px solid #b4b4b4;
+    border-radius: 3px;
+    padding-right: 1px; /* Giảm padding để nút vừa vặn hơn */
+    background-color: white;
+}
+
+QSpinBox:disabled,
+QDoubleSpinBox:disabled {
+    background-color: #f0f0f0;
+}
+
+
+/* === Nút Tăng (Up Button) === */
+QSpinBox::up-button,
+QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    
+    /* SỬA LỖI: Thêm nền và viền rõ ràng để đảm bảo nhất quán */
+    background-color: #f0f0f0;
+    border-left: 1px solid #b4b4b4;
+    border-bottom: 1px solid #c0c0c0; /* Đường kẻ ngang mảnh hơn */
+    
+    /* Bo góc trên bên phải, khớp với viền ngoài */
+    border-top-right-radius: 2px;
+}
+
+/* === Nút Giảm (Down Button) === */
+QSpinBox::down-button,
+QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+
+    /* SỬA LỖI: Thêm nền và viền rõ ràng */
+    background-color: #f0f0f0;
+    border-left: 1px solid #b4b4b4;
+    
+    /* Bo góc dưới bên phải, khớp với viền ngoài */
+    border-bottom-right-radius: 2px;
+}
+
+/* Hiệu ứng khi di chuột qua các nút */
+QSpinBox::up-button:hover,
+QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover,
+QDoubleSpinBox::down-button:hover {
+    background-color: #e6f3ff;
+}
+
+/* Hiệu ứng khi nhấn giữ các nút */
+QSpinBox::up-button:pressed,
+QDoubleSpinBox::up-button:pressed,
+QSpinBox::down-button:pressed,
+QDoubleSpinBox::down-button:pressed {
+    background-color: #cce7ff;
+}
+
+/* === Biểu tượng Mũi tên (Cải tiến: Tăng kích thước để rõ nét hơn) === */
+QSpinBox::up-arrow,
+QDoubleSpinBox::up-arrow {
+    image: url(:/ui/icons/arrow_up.svg);
+    width: 8px;
+    height: 8px;
+}
+
+QSpinBox::down-arrow,
+QDoubleSpinBox::down-arrow {
+    image: url(:/ui/icons/arrow_down.svg);
+    width: 8px;
+    height: 8px;
+}
+
